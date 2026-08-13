@@ -1,0 +1,44 @@
+# Configuración del skill /security-scan
+# Copia este archivo a security-reports/security.config.yml y ajusta los valores.
+# security.config.yml NO debe commitearse si contiene tokens — ya está en .gitignore.
+
+project:
+  name: "CRM API v1" # Nombre mostrado en el reporte
+  key: "crm-api-v1" # Project key en SonarQube
+  language: "auto" # auto | python | node | java | mixed
+
+# --- SonarQube (SAST) ---
+sonarqube:
+  mode: "local" # local (Docker) | remote
+  # Modo local:
+  docker_image: "sonarqube:community"
+  port: 9000
+  # Modo remote (si mode: remote), definir en variables de entorno, no aquí:
+  #   SONAR_HOST_URL, SONAR_TOKEN
+
+# --- OWASP ZAP (DAST) ---
+zap:
+  enabled: true
+  target_url: "" # Se pregunta en runtime si está vacío
+  scan_type: "active" # baseline | active
+  docker_image: "zaproxy/zap-stable"
+
+# --- SCA (dependencias) ---
+sca:
+  npm_audit: true
+  pip_audit: true
+
+# --- Branding del reporte HTML ---
+branding:
+  enabled: false # true para aplicar colores/logo custom
+  primary_color: "#000038"
+  secondary_color: "#00377d"
+  accent_color: "#00c8ff"
+  font_family: "Calibri, Arial, sans-serif"
+  company_name: ""
+  logo_path: "" # ruta a PNG/SVG local, opcional
+
+# --- Salida ---
+output:
+  dir: "security-reports"
+  report_filename: "security-report-completo.html"
