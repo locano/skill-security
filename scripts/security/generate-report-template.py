@@ -214,6 +214,8 @@ def sonar_omit_reason():
         return "Análisis exportado."
     if prereqs and prereqs.get("docker") != "ok":
         return "Omitido: Docker no está disponible o el daemon no está corriendo."
+    if prereqs and prereqs.get("low_disk"):
+        return "Pendiente o omitido por poco disco. Corré --only sonar cuando haya espacio."
     if prereqs and not prereqs.get("sonar_ready"):
         return "Omitido: imágenes o herramientas (jq/curl) no listas."
     return "No se ejecutó SonarQube."
@@ -258,9 +260,13 @@ def prereqs_html():
     docker = prereqs.get("docker", "unknown")
     notes = prereqs.get("notes") or []
     items = "".join(f"<li>{n}</li>" for n in notes)
+    disk = prereqs.get("disk_free_gb") or ""
+    disk_bit = f" · disco libre = <code>{disk} GB</code>" if disk else ""
+    if prereqs.get("low_disk"):
+        disk_bit += " · poco espacio: corré 1 scanner por vez (<code>--only sast|sonar|zap</code>)"
     return f"""
 <div class="note info">
-  <strong>Preflight:</strong> Docker = <code>{docker}</code>
+  <strong>Preflight:</strong> Docker = <code>{docker}</code>{disk_bit}
   {"<ul>" + items + "</ul>" if items else ""}
 </div>
 """
@@ -297,7 +303,11 @@ def zap_targets_note():
         parts.append(f"api: <code>{api}</code>")
     if not parts:
         parts.append(f"target: <code>{single}</code>")
-    return " · ".join(parts)
+    extra = (
+        " ZAP corre en Docker: <code>host.docker.internal</code> es esta Mac "
+        "(tu <code>localhost</code>), no otro servidor. La API/web no hace falta que esté en Docker."
+    )
+    return " · ".join(parts) + extra
 
 
 bandit_c = bandit_counts()

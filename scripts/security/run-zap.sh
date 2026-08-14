@@ -146,6 +146,10 @@ else
 fi
 
 log "Kind=${KIND} script=${ZAP_SCRIPT} target=${ZAP_TARGET} prefix=${PREFIX}"
+if [ -n "$TARGET_URL" ] && [ "$ZAP_TARGET" != "$TARGET_URL" ]; then
+  log "ZAP corre DENTRO de Docker. ${ZAP_TARGET} ES tu proceso en la Mac (${TARGET_URL})."
+  log "No está escaneando otro server: host.docker.internal = esta máquina, no un contenedor."
+fi
 
 docker run --rm \
   --add-host=host.docker.internal:host-gateway \
@@ -159,4 +163,22 @@ docker run --rm \
   -I \
   || log "ZAP retornó código distinto de 0 (normal si encontró alertas)."
 
-log "Reportes: ${OUTPUT_DIR}/${PREFIX}.{html,json}"
+# Los reportes de ZAP quedan con host.docker.internal. Para humanos es localhost.
+if [ -n "$TARGET_URL" ]; then
+  python3 - "$ABS_OUTPUT_DIR" "$PREFIX" <<'PY'
+import sys
+from pathlib import Path
+out, prefix = Path(sys.argv[1]), sys.argv[2]
+for ext in (".json", ".html"):
+    p = out / f"{prefix}{ext}"
+    if p.is_file():
+        text = p.read_text(encoding="utf-8", errors="replace")
+        p.write_text(
+            text.replace("host.docker.internal", "localhost").replace("127.0.0.1", "localhost"),
+            encoding="utf-8",
+        )
+print(f"[run-zap] reportes reescritos a localhost: {prefix}.{{html,json}}", file=sys.stderr)
+PY
+fi
+
+log "Reportes: ${OUTPUT_DIR}/${PREFIX}.{html,json} (URLs como localhost — es tu API/web en la Mac)"

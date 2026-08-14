@@ -55,6 +55,15 @@ bash ~/skill-security/scripts/security/run-scan.sh \
 
 El primer run con Docker baja imágenes (~1GB c/u). Sonar tarda 1–2 min en levantar.
 
+Si hay poco disco (menos de 5 GB), el scan corre **1 por 1** (SAST → Sonar → ZAP)
+para que no fallen todos juntos. También:
+
+```bash
+bash ~/skill-security/scripts/security/run-scan.sh --project-name "Mi app" --only sast
+bash ~/skill-security/scripts/security/run-scan.sh --project-name "Mi app" --only sonar
+bash ~/skill-security/scripts/security/run-scan.sh --project-name "Mi app" --only zap --web-url http://localhost:3000
+```
+
 Detalle: [scripts/security/README.md](scripts/security/README.md).
 
 ## Estructura

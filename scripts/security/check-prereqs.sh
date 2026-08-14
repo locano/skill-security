@@ -4,7 +4,11 @@
 # orquestador. Sin Docker NO aborta el scan completo: SAST/SCA local sigue.
 #
 # Uso:
-#   ./check-prereqs.sh [output_dir] [--with-zap]
+#   ./check-prereqs.sh [output_dir] [--with-zap] [--with-sonar] [--no-sonar] [--no-pull]
+#
+# --no-pull: solo inspecciona (no baja imágenes). Útil si hay poco disco
+# y se corre 1 scanner por vez (--only / --one-by-one).
+# --no-sonar: no toca imágenes ni sonar-status.json (p. ej. fase ZAP).
 #
 # Códigos de salida:
 #   0  Docker listo (SonarQube posible; ZAP si --with-zap)
@@ -15,9 +19,14 @@ set -euo pipefail
 
 OUTPUT_DIR="security-reports"
 WITH_ZAP=0
+WITH_SONAR=1
+NO_PULL=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --with-zap) WITH_ZAP=1 ;;
+    --with-sonar) WITH_SONAR=1 ;;
+    --no-sonar) WITH_SONAR=0 ;;
+    --no-pull) NO_PULL=1 ;;
     --output-dir)
       OUTPUT_DIR="${2:?Falta valor de --output-dir}"
       shift
@@ -56,12 +65,21 @@ write_sonar_status() {
 
 has_cmd() { command -v "$1" >/dev/null 2>&1; }
 
+disk_free_gb() {
+  df -k . 2>/dev/null | awk 'NR==2 { printf "%.1f", $4/1024/1024 }'
+}
+
 ensure_image() {
   local image="$1"
   if docker image inspect "$image" >/dev/null 2>&1; then
     log "Imagen ya local: ${image}"
     echo "pulled"
     return 0
+  fi
+  if [ "$NO_PULL" -eq 1 ]; then
+    log "Imagen no local y --no-pull: ${image}"
+    echo "missing"
+    return 1
   fi
   log "Descargando ${image} (puede tardar, ~1GB)..."
   if docker pull "$image" >&2; then
@@ -117,22 +135,45 @@ else
   fi
 fi
 
+DISK_FREE_GB="$(disk_free_gb)"
+LOW_DISK=false
+if [ -n "$DISK_FREE_GB" ]; then
+  log "Disco libre (cwd): ${DISK_FREE_GB} GB"
+  python3 -c "import sys; sys.exit(0 if float('${DISK_FREE_GB}' or '99') < 5 else 1)" && LOW_DISK=true || true
+fi
+if [ "$LOW_DISK" = true ]; then
+  note "Poco disco (${DISK_FREE_GB} GB). Corré 1 scanner por vez: --only sast | --only sonar | --only zap"
+  log "Poco disco (${DISK_FREE_GB} GB). No bajes Sonar+ZAP juntos: usá --only / --one-by-one."
+  if [ "$NO_PULL" -eq 0 ] && [ "$WITH_SONAR" -eq 1 ] && [ "$WITH_ZAP" -eq 1 ]; then
+    log "Con poco espacio no se hace pull de ZAP ahora (queda para --only zap)."
+    WITH_ZAP=0
+  fi
+fi
+
 if [ "$DOCKER_STATUS" = "ok" ]; then
-  SONAR_IMAGE_STATUS="$(ensure_image "$SONAR_IMAGE" || true)"
-  SCANNER_IMAGE_STATUS="$(ensure_image "$SCANNER_IMAGE" || true)"
+  if [ "$WITH_SONAR" -eq 1 ]; then
+    SONAR_IMAGE_STATUS="$(ensure_image "$SONAR_IMAGE" || true)"
+    SCANNER_IMAGE_STATUS="$(ensure_image "$SCANNER_IMAGE" || true)"
+  else
+    SONAR_IMAGE_STATUS="skipped"
+    SCANNER_IMAGE_STATUS="skipped"
+    note "Pull de Sonar omitido (--no-sonar o --only de otra fase)."
+  fi
   if [ "$WITH_ZAP" -eq 1 ]; then
     ZAP_IMAGE_STATUS="$(ensure_image "$ZAP_IMAGE" || true)"
   else
     ZAP_IMAGE_STATUS="skipped"
-    note "ZAP no se descargó: no hay URL de DAST."
+    note "ZAP no se descargó en este paso (sin URL, poco disco, o --only de otra fase)."
   fi
 
-  if [ "$SONAR_IMAGE_STATUS" = "pulled" ] && [ "$SCANNER_IMAGE_STATUS" = "pulled" ] && [ "$CURL_OK" = true ] && [ "$JQ_OK" = true ]; then
-    SONAR_READY=true
-    note "SonarQube listo. El primer arranque del servidor tarda 1–2 min. URL: http://localhost:9000"
-  else
-    note "SonarQube no está listo (imagen, curl o jq faltante). URL prevista: http://localhost:9000"
-    write_sonar_status images_missing "Imagen, curl o jq faltante. URL prevista: http://localhost:9000"
+  if [ "$WITH_SONAR" -eq 1 ]; then
+    if [ "$SONAR_IMAGE_STATUS" = "pulled" ] && [ "$SCANNER_IMAGE_STATUS" = "pulled" ] && [ "$CURL_OK" = true ] && [ "$JQ_OK" = true ]; then
+      SONAR_READY=true
+      note "SonarQube listo. El primer arranque del servidor tarda 1–2 min. URL: http://localhost:9000"
+    else
+      note "SonarQube no está listo (imagen, curl o jq faltante). URL prevista: http://localhost:9000"
+      write_sonar_status images_missing "Imagen, curl o jq faltante. URL prevista: http://localhost:9000"
+    fi
   fi
 
   if [ "$WITH_ZAP" -eq 1 ] && [ "$ZAP_IMAGE_STATUS" = "pulled" ]; then
@@ -143,7 +184,7 @@ fi
 # Serializar notes a JSON vía python3 (ya confirmado).
 export PYTHON3_OK PYYAML_OK CURL_OK JQ_OK DOCKER_STATUS
 export SONAR_IMAGE_STATUS SCANNER_IMAGE_STATUS ZAP_IMAGE_STATUS
-export SONAR_READY ZAP_READY OUTPUT_DIR
+export SONAR_READY ZAP_READY OUTPUT_DIR DISK_FREE_GB LOW_DISK
 NOTES_JSON="$(printf '%s\n' "${NOTES[@]+"${NOTES[@]}"}" | python3 -c 'import json,sys; print(json.dumps([l.rstrip("\n") for l in sys.stdin if l.strip()]))')"
 export NOTES_JSON
 
@@ -167,6 +208,8 @@ out = {
     },
     "sonar_ready": b(os.environ["SONAR_READY"]),
     "zap_ready": b(os.environ["ZAP_READY"]),
+    "disk_free_gb": os.environ.get("DISK_FREE_GB") or "",
+    "low_disk": b(os.environ.get("LOW_DISK") or "false"),
     "notes": json.loads(os.environ.get("NOTES_JSON") or "[]"),
 }
 path = Path(os.environ["OUTPUT_DIR"]) / "prereqs.json"

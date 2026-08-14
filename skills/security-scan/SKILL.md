@@ -51,6 +51,31 @@ Si el contenedor es virgen y todavía no corrió el setup: `admin` / `admin`.
    `--with-zap` solo si hay alguna URL. Leé `inventory.json` y decile al
    usuario: tipos (web/api/serverless), stacks, si DAST aplica.
 
+   Si `prereqs.json` tiene `low_disk: true` (o menos de 5 GB libres): **no**
+   bajes Sonar y ZAP en el mismo `check-prereqs`. Avisá: “poco disco; corro
+   1 scanner por vez para que no fallen todos”. Orden:
+
+   1. SAST (sin imágenes Docker)
+   2. `check-prereqs.sh security-reports` (solo Sonar) + `run-sonarqube.sh`
+   3. `check-prereqs.sh security-reports --no-sonar --with-zap` + `run-zap.sh`
+   4. `map-owasp.py` + HTML (aunque falte una fase)
+
+   Si un pull falla por espacio, seguí con lo que ya hay y generá el HTML.
+   El usuario (o vos) también puede repetir:
+
+   ```bash
+   bash "${CLAUDE_PLUGIN_ROOT}/scripts/security/run-scan.sh" \
+     --project-name "<nombre>" --only sast
+   bash "${CLAUDE_PLUGIN_ROOT}/scripts/security/run-scan.sh" \
+     --project-name "<nombre>" --only sonar
+   bash "${CLAUDE_PLUGIN_ROOT}/scripts/security/run-scan.sh" \
+     --project-name "<nombre>" --only zap --web-url <url>
+   bash "${CLAUDE_PLUGIN_ROOT}/scripts/security/run-scan.sh" \
+     --project-name "<nombre>" --only report
+   ```
+
+   `--one-by-one` en `run-scan.sh` hace el mismo orden (pull por fase).
+
 3. **SAST local** — “Bandit / npm audit / pip-audit, segundos”.
 
    ```bash

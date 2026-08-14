@@ -15,10 +15,20 @@ bash /ruta/al/plugin/scripts/security/run-scan.sh \
   [--api-url http://localhost:8000] \
   [--target-url http://localhost:3000] \
   [--openapi openapi.yaml] \
-  [--scan-type baseline]
+  [--scan-type baseline] \
+  [--only sast|sonar|zap|report] \
+  [--one-by-one]
 ```
 
+Con poco disco (menos de 5 GB en el cwd) `run-scan.sh` pasa solo a **1 por 1**:
+no baja Sonar y ZAP juntos. `--only` corre un scanner y regenera el HTML
+con lo que haya (se puede repetir). `--one-by-one` fuerza ese orden.
+
 `--target-url` es un solo target (compat, escribe `zap-dast-report.json`).
+ZAP vive en Docker: si pasás `http://localhost:4000`, por dentro usa
+`host.docker.internal:4000` para llegar a **tu proceso en la Mac**. Es la
+misma API/web; no hace falta que esté en Docker. Los reportes se reescriben
+otra vez a `localhost` para que no parezca otro host.
 `--web-url` + `--api-url` generan `zap-dast-web.json` y `zap-dast-api.json`.
 Sin URL, ZAP se omite; SAST de toda la carpeta sigue.
 

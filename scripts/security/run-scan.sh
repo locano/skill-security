@@ -4,8 +4,11 @@
 #   ./run-scan.sh --project-name "Mi app" [--project-key key] \
 #     [--web-url URL] [--api-url URL] [--target-url URL] \
 #     [--openapi FILE] [--scan-type baseline|active] \
+#     [--only sast|sonar|zap|report] [--one-by-one] \
 #     [--output-dir security-reports] [--port 9000]
 #
+# --only: un scanner por corrida (si hay poco disco/RAM). Se puede repetir.
+# --one-by-one: no baja Sonar y ZAP juntos; pull justo antes de cada fase.
 # --target-url = un solo target (compat). Sin URL, ZAP se omite (SAST válido).
 
 set -euo pipefail
@@ -23,9 +26,11 @@ OPENAPI=""
 SCAN_TYPE="baseline"
 OUTPUT_DIR="security-reports"
 PORT="9000"
+ONLY=""
+ONE_BY_ONE=0
 
 usage() {
-  echo "Uso: run-scan.sh --project-name NAME [--web-url URL] [--api-url URL] [--target-url URL] [--openapi FILE] [--scan-type baseline|active]" >&2
+  echo "Uso: run-scan.sh --project-name NAME [--web-url URL] [--api-url URL] [--only sast|sonar|zap|report] [--one-by-one]" >&2
   exit 2
 }
 
@@ -40,6 +45,11 @@ while [ $# -gt 0 ]; do
     --scan-type) SCAN_TYPE="${2:-baseline}"; shift ;;
     --output-dir) OUTPUT_DIR="${2:-security-reports}"; shift ;;
     --port) PORT="${2:-9000}"; shift ;;
+    --only)
+      ONLY="${ONLY:+$ONLY,}${2:-}"
+      shift
+      ;;
+    --one-by-one) ONE_BY_ONE=1 ;;
     -h|--help) usage ;;
     *) echo "[run-scan] argumento desconocido: $1" >&2; usage ;;
   esac
@@ -51,6 +61,34 @@ phase() {
   echo "" >&2
   echo "=== [$1] $2 ===" >&2
 }
+
+want() {
+  # want sast|sonar|zap|report|inventory — vacío ONLY = todo
+  if [ -z "$ONLY" ]; then
+    return 0
+  fi
+  case ",$ONLY," in
+    *",$1,"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+if [ -n "$ONLY" ]; then
+  _only_ok=1
+  _rest="$ONLY"
+  while [ -n "$_rest" ]; do
+    _part="${_rest%%,*}"
+    [ "$_part" = "$_rest" ] && _rest="" || _rest="${_rest#*,}"
+    case "$_part" in
+      sast|sonar|zap|report|inventory) ;;
+      *)
+        echo "[run-scan] --only inválido: ${_part} (sast|sonar|zap|report)" >&2
+        _only_ok=0
+        ;;
+    esac
+  done
+  [ "$_only_ok" -eq 1 ] || usage
+fi
 
 if [ -z "$PROJECT_NAME" ]; then
   echo "[run-scan] Falta --project-name." >&2
@@ -109,7 +147,26 @@ cfg["output"].setdefault("report_filename", "security-report-completo.html")
 Path(path).write_text(yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True), encoding="utf-8")
 PY
 
-phase "1/6" "Inventario + preflight (puede bajar imágenes ~1GB)"
+prereq_flag() {
+  python3 -c "import json,sys; print('true' if json.load(open(sys.argv[1])).get(sys.argv[2]) else 'false')" \
+    "${OUTPUT_DIR}/prereqs.json" "$1" 2>/dev/null || echo "false"
+}
+
+run_prereqs() {
+  local rc=0
+  bash "${SCRIPT_DIR}/check-prereqs.sh" "$@" || rc=$?
+  if [ "$rc" -eq 1 ]; then
+    log "Preflight falló (falta python3). Abortando."
+    exit 1
+  fi
+  return 0
+}
+
+if [ -n "$ONLY" ]; then
+  log "Corrida parcial (--only ${ONLY}). Repetí con otro --only si hace falta."
+fi
+
+phase "1/6" "Inventario + preflight (inspección; pull según espacio)"
 python3 "${SCRIPT_DIR}/collect-inventory.py" "${OUTPUT_DIR}" || log "Inventario falló; se sigue."
 
 if [ -z "$OPENAPI" ] && [ -f "${OUTPUT_DIR}/inventory.json" ]; then
@@ -130,23 +187,46 @@ if p.exists():
     p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 PY
 
-PREREQ_ARGS=("${OUTPUT_DIR}")
-if [ "$HAS_DAST" -eq 1 ]; then
-  PREREQ_ARGS+=(--with-zap)
+INSPECT_ARGS=("${OUTPUT_DIR}" --no-pull)
+if ! want sonar; then
+  INSPECT_ARGS+=(--no-sonar)
 fi
-PREREQ_RC=0
-bash "${SCRIPT_DIR}/check-prereqs.sh" "${PREREQ_ARGS[@]}" || PREREQ_RC=$?
-if [ "$PREREQ_RC" -eq 1 ]; then
-  log "Preflight falló (falta python3). Abortando."
-  exit 1
+if want zap && [ "$HAS_DAST" -eq 1 ]; then
+  INSPECT_ARGS+=(--with-zap)
+fi
+run_prereqs "${INSPECT_ARGS[@]}"
+
+if [ "$(prereq_flag low_disk)" = "true" ]; then
+  ONE_BY_ONE=1
+  log "Poco disco: 1 scanner por vez (Sonar y ZAP no se bajan juntos)."
+fi
+if [ "$ONE_BY_ONE" -eq 1 ]; then
+  log "Modo 1 por 1: pull justo antes de cada fase que lo necesite."
+elif want sonar || { want zap && [ "$HAS_DAST" -eq 1 ]; }; then
+  PULL_ARGS=("${OUTPUT_DIR}")
+  if ! want sonar; then
+    PULL_ARGS+=(--no-sonar)
+  fi
+  if want zap && [ "$HAS_DAST" -eq 1 ]; then
+    PULL_ARGS+=(--with-zap)
+  fi
+  log "Espacio OK: pull de las imágenes de esta corrida."
+  run_prereqs "${PULL_ARGS[@]}"
 fi
 
+if want sast; then
 phase "2/6" "SAST + SCA local (Bandit / pip-audit / npm audit)"
 bash "${SCRIPT_DIR}/run-sast-sca.sh" "${OUTPUT_DIR}"
+fi
 
+if want sonar; then
 phase "3/6" "SonarQube — dashboard ${SONAR_DASHBOARD} (primer arranque 1–2 min)"
+if [ "$ONE_BY_ONE" -eq 1 ]; then
+  log "1 por 1: pull solo de imágenes Sonar…"
+  run_prereqs "${OUTPUT_DIR}"
+fi
 log "Si el scan falla, abrí igual: ${SONAR_DASHBOARD}"
-SONAR_READY="$(python3 -c "import json,sys; p=json.load(open(sys.argv[1])); print('true' if p.get('sonar_ready') else 'false')" "${OUTPUT_DIR}/prereqs.json" 2>/dev/null || echo "false")"
+SONAR_READY="$(prereq_flag sonar_ready)"
 if [ "$SONAR_READY" = "true" ]; then
   bash "${SCRIPT_DIR}/run-sonarqube.sh" "${PROJECT_KEY}" "${PROJECT_NAME}" "${OUTPUT_DIR}" "${PORT}" \
     || log "SonarQube falló. Dashboard: ${SONAR_DASHBOARD}"
@@ -155,14 +235,22 @@ else
     "Docker/imágenes no listos. URL prevista: ${SONAR_DASHBOARD}" \
     "http://localhost:${PORT}" "${PROJECT_KEY}" || true
   log "SonarQube omitido. URL prevista: ${SONAR_DASHBOARD}"
+  log "Si faltó espacio: liberá disco y repetí con --only sonar"
+fi
 fi
 
+if want zap; then
 phase "4/6" "DAST OWASP ZAP (solo si hay URL HTTP)"
-ZAP_READY="$(python3 -c "import json,sys; p=json.load(open(sys.argv[1])); print('true' if p.get('zap_ready') else 'false')" "${OUTPUT_DIR}/prereqs.json" 2>/dev/null || echo "false")"
+if [ "$ONE_BY_ONE" -eq 1 ] && [ "$HAS_DAST" -eq 1 ]; then
+  log "1 por 1: pull solo de ZAP…"
+  run_prereqs "${OUTPUT_DIR}" --no-sonar --with-zap
+fi
+ZAP_READY="$(prereq_flag zap_ready)"
 if [ "$HAS_DAST" -eq 0 ]; then
   log "ZAP omitido: no hay --web-url / --api-url / --target-url. SAST sigue siendo válido."
 elif [ "$ZAP_READY" != "true" ]; then
   log "ZAP omitido: Docker/imagen no listos."
+  log "Si faltó espacio: liberá disco y repetí con --only zap"
 else
   if [ -n "$WEB_URL" ] && [ -n "$API_URL" ]; then
     log "ZAP web → ${WEB_URL} (varios minutos)..."
@@ -195,15 +283,23 @@ else
     fi
   fi
 fi
+fi
 
 phase "5/6" "Mapeo OWASP Top 10 / API Top 10"
 python3 "${SCRIPT_DIR}/map-owasp.py" "${OUTPUT_DIR}" || log "map-owasp falló."
 
-phase "6/6" "Reporte HTML"
+phase "6/6" "Reporte HTML (con lo que haya hasta ahora)"
 python3 "${SCRIPT_DIR}/generate-report-template.py" "${OUTPUT_DIR}"
 
 echo "" >&2
 log "Listo. HTML: ${OUTPUT_DIR}/security-report-completo.html"
+if [ -n "$ONLY" ]; then
+  log "Esta corrida fue --only ${ONLY}. Siguiente, si hace falta:"
+  log "  --only sast | --only sonar | --only zap | --only report"
+fi
+if [ "$ONE_BY_ONE" -eq 1 ] && [ -z "$ONLY" ]; then
+  log "Se corrió 1 por 1 por espacio. Si algo se omitió, repetí esa fase con --only."
+fi
 if [ -f "${OUTPUT_DIR}/.sonar-admin" ] && [ -s "${OUTPUT_DIR}/.sonar-admin" ]; then
   SONAR_PASS="$(cat "${OUTPUT_DIR}/.sonar-admin")"
 else
