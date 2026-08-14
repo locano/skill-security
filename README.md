@@ -1,65 +1,87 @@
 # /security-scan
 
-Skill de [Claude Code](https://claude.com/claude-code) que corre un análisis de seguridad completo
-(SAST + DAST + SCA + OWASP API Security Top 10) directo en tu repositorio, sin plataformas externas
-que configurar.
+Skill de [Claude Code](https://claude.com/claude-code) que analiza **cualquier
+repo** (web, API, serverless o mixto): SAST de toda la carpeta, DAST solo si
+hay una URL HTTP, checklist OWASP Top 10 / API Top 10, y un HTML final.
 
-**Página explicativa:** `index.html` — pensada para GitHub Pages, cubre qué es, qué analiza y por qué
-nació de un caso real. Instrucciones para publicarla abajo.
+**Página explicativa:** `index.html`.
 
-## Instalación en tu repo
+## Qué cubre
+
+| Tipo | SAST (Sonar + Bandit/SCA) | DAST (ZAP) | OWASP |
+|---|---|---|---|
+| Web | Toda la carpeta | Si hay `--web-url` | Top 10 2021 |
+| API | Toda la carpeta | `--api-url` y/o OpenAPI | API Top 10 2023 |
+| Web + API | Un Sonar sobre el cwd | Las dos URLs, opcionales | Ambas listas |
+| Serverless | El código es código | Solo si hay URL HTTP (gateway / `sam local`) | SAST + revisión de handlers |
+
+Sin URL el scan **es válido**. ZAP se omite; no es un fallo. No se valida el
+“orden de carpetas” del proyecto destino.
+
+SonarQube (si Docker está): `http://localhost:9000/dashboard?id=<project-key>`
+— esa URL se informa **aunque el scan falle**.
+
+Login (también lo imprime el scan y el HTML):
+
+- Usuario: `admin`
+- Password: la de `security-reports/.sonar-admin`, o si el archivo no existe: `Security_Scan_2026!` (el año actual).
+- Si Sonar nunca cambió la clave: `admin` / `admin`.
+
+## Instalación
 
 ```bash
-git clone https://github.com/locano/skill-security.git
-cp -r skill-security/.claude/agents/security-scan.md tu-repo/.claude/agents/
-cp -r skill-security/scripts/security tu-repo/scripts/
-cp skill-security/security-reports/security.config.example.yml tu-repo/security-reports/
-chmod +x tu-repo/scripts/security/*.sh
+git clone git@github.com:<tu-org>/skill-security.git ~/skill-security
 ```
 
-Después, en Claude Code dentro de tu repo:
+En Claude Code:
 
 ```
-corre un security scan
+/plugin marketplace add ~/skill-security
+/plugin install security-scan@skill-security
 ```
 
-Detalle técnico completo en [scripts/security/README.md](scripts/security/README.md).
+En cualquier repo: `/security-scan` o “corre un security scan”. El agente
+pregunta el nombre y URLs opcionales, y **avisa cada fase** (no se queda
+callado 15 minutos).
+
+A mano, desde la raíz del repo a analizar:
+
+```bash
+bash ~/skill-security/scripts/security/run-scan.sh \
+  --project-name "Mi app" \
+  --web-url http://localhost:3000 \
+  --api-url http://localhost:8000
+```
+
+El primer run con Docker baja imágenes (~1GB c/u). Sonar tarda 1–2 min en levantar.
+
+Detalle: [scripts/security/README.md](scripts/security/README.md).
 
 ## Estructura
 
 ```
-.claude/agents/security-scan.md          skill (instrucciones para Claude Code)
+.claude-plugin/plugin.json
+skills/security-scan/SKILL.md            instrucciones del agente (fases + URL Sonar)
 scripts/security/
-  setup-sonarqube.sh                     Docker + SonarQube + token vía API REST
-  run-zap.sh                             Docker + ZAP baseline/active scan
-  run-sast-sca.sh                        Bandit + pip-audit + npm audit, sin Docker
-  generate-report-template.py            genera el HTML final desde JSON + config
-  README.md                              quickstart técnico
-security-reports/security.config.example.yml   plantilla de config por repo
-index.html                               página explicativa (GitHub Pages)
+  run-scan.sh                            orquestador CLI con banners [1/6]…[6/6]
+  collect-inventory.py                   web / api / serverless / OpenAPI
+  check-prereqs.sh                       Docker + pull
+  write-sonar-status.py                  sonar-status.json (URL siempre)
+  setup-sonarqube.sh / run-sonarqube.sh
+  run-zap.sh                             --web/--api/--openapi o URL única
+  run-sast-sca.sh
+  map-owasp.py                           Top 10 web + API
+  generate-report-template.py
+security-reports/security.config.example.yml
+index.html
 ```
-
-## Publicar la página en GitHub Pages
-
-1. Configuración del repo → Pages → Source: `Deploy from a branch` → rama `main`, carpeta `/ (root)`.
-2. La página queda en `https://locano.github.io/skill-security/`.
-
-## Por qué existe
-
-Nació de una auditoría de seguridad real (SonarQube, Bandit, OWASP ZAP, npm audit) sobre el API del
-CRM en LC2TECH, que encontró y cerró vulnerabilidades críticas: `eval()` sin
-sandboxing (CWE-78), S3 sin `ExpectedBucketOwner` (CWE-284), y dependencias npm con RCE conocidos.
-El mismo flujo que generó ese reporte es el que empaqueta este skill.
 
 ## Guardrails
 
-El skill nunca corre sin preguntar:
-
-- `npm audit fix` — modifica `package-lock.json`.
-- Un active scan de ZAP contra una URL — siempre confirma target y ambiente.
-- Un `git commit` de los reportes generados.
+- No `npm audit fix` sin preguntar.
+- No ZAP active a producción.
+- No commit de `security-reports/` sin pedido explícito.
 
 ## Licencia
 
-Uso interno / libre para compartir dentro del equipo. Ajustá esta sección si vas a abrir el repo
-públicamente con una licencia formal (MIT, Apache-2.0, etc.).
+Uso interno / libre para el equipo.

@@ -1,26 +1,31 @@
 # Configuración del skill /security-scan
 # Copia este archivo a security-reports/security.config.yml y ajusta los valores.
-# security.config.yml NO debe commitearse si contiene tokens — ya está en .gitignore.
+# security.config.yml y .sonar-admin NO deben commitearse — están en .gitignore.
 
 project:
   name: "CRM API v1" # Nombre mostrado en el reporte
   key: "crm-api-v1" # Project key en SonarQube
   language: "auto" # auto | python | node | java | mixed
 
-# --- SonarQube (SAST) ---
+# --- SonarQube (SAST sobre el repo actual) ---
+# Corre solo si Docker está levantado. No es opt-in.
 sonarqube:
   mode: "local" # local (Docker) | remote
-  # Modo local:
   docker_image: "sonarqube:community"
+  scanner_image: "sonarsource/sonar-scanner-cli"
   port: 9000
   # Modo remote (si mode: remote), definir en variables de entorno, no aquí:
   #   SONAR_HOST_URL, SONAR_TOKEN
 
 # --- OWASP ZAP (DAST) ---
+# Solo corre si hay alguna URL. localhost vale. Serverless sin HTTP: omitir.
 zap:
-  enabled: true
-  target_url: "" # Se pregunta en runtime si está vacío
-  scan_type: "active" # baseline | active
+  enabled: false
+  target_url: "" # un solo target (compat)
+  web_url: ""
+  api_url: ""
+  openapi: "" # ruta o URL; si está vacío se busca openapi.json / swagger.yaml
+  scan_type: "baseline" # baseline | active
   docker_image: "zaproxy/zap-stable"
 
 # --- SCA (dependencias) ---

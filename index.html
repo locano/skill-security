@@ -706,15 +706,15 @@
         </p>
         <div class="hero-ctas">
           <a href="#instalar" class="btn btn-primary"
-            >Ver las 3 rutas a copiar</a
+            >Ver cómo instalarlo</a
           >
           <a href="#origen" class="btn btn-secondary"
             >Cómo se usó en producción</a
           >
         </div>
         <p class="hero-meta">
-          Funciona con o sin Docker · SAST/SCA corren en segundos · DAST siempre
-          pide confirmación
+          Web, API o serverless · SonarQube si Docker está (URL siempre) · DAST
+          solo con URL HTTP
         </p>
 
         <div class="terminal reveal">
@@ -732,11 +732,10 @@
               <span class="terminal-cmd">corre un security scan</span>
             </div>
             <div class="terminal-out">
-              detectando stack del repo… Python + Node<br />
-              Bandit → 6 hallazgos HIGH &nbsp;·&nbsp; npm audit → 12
-              vulnerabilidades<br />
-              ¿confirmas URL target para DAST?
-              <span class="ok">esperando confirmación…</span><br />
+              preflight Docker… imágenes OK<br />
+              Bandit + SonarQube sobre este repo<br />
+              DAST: URL opcional (localhost vale)
+              <span class="ok">sin URL → ZAP omitido</span><br />
               <span class="ok">✓</span>
               security-reports/security-report-completo.html generado
             </div>
@@ -895,13 +894,13 @@
             </div>
             <div class="analysis-body">
               <p>
-                Los diez puntos que ninguna herramienta automatizada cubre por
-                completo: BOLA, autenticación rota, asignación excesiva de
-                propiedades, consumo de recursos, exposición de inventario.
-                Requiere leer el código de los handlers — se documenta como pass
-                / falla / parcial con evidencia.
+                Checklist OWASP API Top 10 2023: ZAP (URL o OpenAPI) + mapeo
+                CWE + revisión de handlers (BOLA, auth, mass assignment).
+                Sirve para API y serverless; sin URL HTTP el SAST igual corre.
               </p>
               <div class="analysis-tools">
+                <span class="tool-chip">OWASP ZAP</span>
+                <span class="tool-chip">Mapeo CWE</span>
                 <span class="tool-chip">Revisión guiada</span>
               </div>
             </div>
@@ -958,8 +957,8 @@
               <strong>Se degrada con gracia</strong>
               <p>
                 Si no tenés Docker, corre igual Bandit + npm/pip audit sin
-                fricción. SonarQube y ZAP quedan como opt-in cuando los
-                necesitás.
+                fricción. SonarQube se omite solo por falta de Docker, no
+                porque haya que pedirlo. ZAP corre si diste una URL.
               </p>
             </div>
           </div>
@@ -969,10 +968,12 @@
       <!-- ================= INSTALACIÓN ================= -->
       <section id="instalar" class="wrap">
         <div class="section-head reveal">
-          <h2>Instalación: tres rutas, ningún build step</h2>
+          <h2>Instalación: un plugin interno, sin marketplace público</h2>
           <p>
-            No hay paquete que instalar ni cuenta que crear. Copiás tres rutas a
-            tu repo y ya está.
+            No se copian archivos a mano a cada repo. Es un plugin de Claude
+            Code que cada persona instala una vez desde un clone propio, y
+            queda disponible como <code>/security-scan</code> en cualquier
+            repo donde lo active.
           </p>
         </div>
 
@@ -981,19 +982,15 @@
             <span class="install-num"></span>
             <div>
               <div class="install-title">
-                Cloná el skill y copiá las tres rutas a tu repo
+                Cloná el repo (no hace falta que sea público)
               </div>
               <p class="install-desc">
-                Un clone temporal, copiás lo que necesitás, y listo — no hace
-                falta mantenerlo como submódulo ni dependencia.
+                Un clone permanente en tu máquina — es de donde Claude Code va
+                a leer el plugin.
               </p>
               <div class="code-block">
-                <pre><span class="cm"># en cualquier carpeta temporal</span>
-git clone https://github.com/locano/skill-security.git
-<span class="cm"># desde la raíz de TU repo</span>
-cp -r ../skill-security/.claude/agents/security-scan.md .claude/agents/
-cp -r ../skill-security/scripts/security scripts/
-cp ../skill-security/security-reports/security.config.example.yml security-reports/</pre>
+                <pre><span class="cm"># clone interno, ej. a tu carpeta de proyectos</span>
+git clone git@github.com:&lt;tu-org&gt;/skill-security.git ~/skill-security</pre>
                 <button class="copy-btn" type="button" data-copy-target="cmd-1">
                   Copiar
                 </button>
@@ -1005,11 +1002,17 @@ cp ../skill-security/security-reports/security.config.example.yml security-repor
             <span class="install-num"></span>
             <div>
               <div class="install-title">
-                Dale permisos de ejecución a los scripts
+                Agregá el marketplace local e instalá el plugin
               </div>
-              <p class="install-desc">Solo la primera vez.</p>
+              <p class="install-desc">
+                <code>marketplace add</code> acepta una ruta local — no
+                publica nada ni requiere un repo público. Se hace una sola vez
+                por persona.
+              </p>
               <div class="code-block">
-                <pre>chmod +x scripts/security/*.sh</pre>
+                <pre><span class="cm">$</span> claude
+<span class="cm">›</span> /plugin marketplace add ~/skill-security
+<span class="cm">›</span> /plugin install security-scan@skill-security</pre>
                 <button class="copy-btn" type="button" data-copy-target="cmd-2">
                   Copiar
                 </button>
@@ -1021,15 +1024,20 @@ cp ../skill-security/security-reports/security.config.example.yml security-repor
             <span class="install-num"></span>
             <div>
               <div class="install-title">
-                Abrí Claude Code en tu repo y pedí el scan
+                Desde cualquier repo, pedí el scan
               </div>
               <p class="install-desc">
-                Te va a preguntar el nombre del proyecto, si querés branding
-                custom, y la URL target si vas a correr DAST.
+                Te pregunta el nombre y URLs opcionales (web y/o API; localhost
+                vale). Avisa cada fase. SonarQube analiza toda la carpeta y te
+                deja URL + login: <code>http://localhost:9000</code>, usuario
+                <code>admin</code>, password en
+                <code>security-reports/.sonar-admin</code> (o
+                <code>Security_Scan_&lt;año&gt;!</code>). Sin URL, ZAP se omite
+                y el SAST sigue siendo válido.
               </p>
               <div class="code-block">
                 <pre><span class="cm">$</span> claude
-<span class="cm">›</span> corre un security scan</pre>
+<span class="cm">›</span> /security-scan</pre>
                 <button class="copy-btn" type="button" data-copy-target="cmd-3">
                   Copiar
                 </button>

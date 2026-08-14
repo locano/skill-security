@@ -1,53 +1,70 @@
-# Security Scan — SAST + SCA + DAST reutilizable
+# Security Scan — SAST + SCA + DAST
 
-Skill de Claude Code para correr un análisis de seguridad completo en
-cualquier repositorio. Portable: copia esta carpeta + `.claude/agents/security-scan.md`
-+ `security-reports/security.config.example.yml` a otro repo y ya funciona ahí.
+Plugin: `/security-scan`. Los scripts corren desde el plugin; el cwd es el
+repo a analizar.
 
-## Uso rápido
+## Uso
 
-1. Abre Claude Code en la raíz del repo.
-2. Pide: **"corre un security scan"** o **"/security-scan"**.
-3. Claude te preguntará: nombre del proyecto, si quieres branding custom, y
-   la URL target si vas a correr DAST (ZAP). Nunca asume esos datos.
-4. Al final tendrás `security-reports/security-report-completo.html`.
+Desde la raíz del destino:
+
+```bash
+bash /ruta/al/plugin/scripts/security/run-scan.sh \
+  --project-name "Mi app" \
+  [--project-key mi-app] \
+  [--web-url http://localhost:3000] \
+  [--api-url http://localhost:8000] \
+  [--target-url http://localhost:3000] \
+  [--openapi openapi.yaml] \
+  [--scan-type baseline]
+```
+
+`--target-url` es un solo target (compat, escribe `zap-dast-report.json`).
+`--web-url` + `--api-url` generan `zap-dast-web.json` y `zap-dast-api.json`.
+Sin URL, ZAP se omite; SAST de toda la carpeta sigue.
+
+`run-scan.sh` imprime `=== [1/6] … ===`. El skill de Claude **no** debe
+usarlo en silencio: corre cada script y avisa al usuario entre fases.
+
+## Matriz
+
+| Tipo | SAST | ZAP | OWASP |
+|---|---|---|---|
+| Web | cwd | `--web-url` | Top 10 2021 |
+| API | cwd | `--api-url` / OpenAPI | API Top 10 2023 |
+| Serverless | cwd | solo si hay URL HTTP | handlers (revisión) |
+
+No se lintéa el layout de carpetas. Inventario descriptivo en `inventory.json`.
+
+## SonarQube
+
+Dashboard: `http://localhost:9000/dashboard?id=<key>`
+
+Login (el script y el HTML lo muestran siempre):
+
+- Usuario: `admin`
+- Password: contenido de `security-reports/.sonar-admin`
+- Si ese archivo no existe: `Security_Scan_<año>!` (ej. `Security_Scan_2026!`)
+- Primera vez, antes de que el skill cambie la clave: `admin` / `admin`
+
+Se escribe en `sonar-status.json` (`login`, `password`, `dashboard_url`)
+aunque el scanner falle.
+
+Si el dashboard dice “Main Branch is not analyzed yet”, el servidor está UP
+pero `sonar-scanner` no subió el análisis (en monorepos JS/TS suele ser falta
+de RAM en el bridge de Node). El log queda en
+`security-reports/sonar-scanner.log`. El script pide 2G Java + 4G Node y
+excluye `node_modules`, `.pnpm`, `dist`, `.next`, etc.
 
 ## Requisitos
 
-| Herramienta | Para qué | Obligatorio |
-|---|---|---|
-| `python3` + `pyyaml` | Generar el reporte | Sí |
-| `bandit` | SAST Python | Se instala solo si falta |
-| `pip-audit` | SCA Python | Se instala solo si falta |
-| `npm` | SCA Node | Solo si hay `package.json` |
-| `docker` | SonarQube + ZAP | Solo si quieres esos scans |
-| `jq`, `curl` | Scripts de setup | Sí, para SonarQube/ZAP |
+| Herramienta | Obligatorio |
+|---|---|
+| `python3` + `pyyaml` | Sí |
+| `docker` | No (sin Docker: Bandit/SCA) |
+| `jq`, `curl` | SonarQube |
 
-Sin Docker igual obtienes Bandit + npm/pip audit — es el 80% del valor sin
-fricción de infraestructura.
+## Guardrails
 
-## Qué NO hace automático (por diseño, requiere tu confirmación)
-
-- **No corre `npm audit fix` sin preguntar** — modifica `package-lock.json`.
-- **No lanza un ZAP active scan sin que confirmes la URL y el ambiente** —
-  un active scan envía payloads de ataque reales.
-- **No commitea `security-reports/` sin preguntar.**
-
-## Archivos
-
-```
-.claude/agents/security-scan.md              skill (instrucciones para Claude)
-scripts/security/
-  setup-sonarqube.sh                          Docker + SonarQube + token
-  run-zap.sh                                  Docker + ZAP baseline/active
-  run-sast-sca.sh                             Bandit + pip-audit + npm audit (sin Docker)
-  generate-report-template.py                 Genera el HTML final desde los JSON + config
-security-reports/
-  security.config.example.yml                 plantilla — copiar a security.config.yml
-  security.config.yml                         config real del repo (gitignored)
-```
-
-## Reevaluar después de aplicar fixes
-
-Corre el mismo comando de nuevo — el reporte se regenera con el estado
-actual del código. No hace falta borrar nada del directorio primero.
+- No `npm audit fix` sin confirmar.
+- No active scan a producción.
+- No commit de `security-reports/` sin pedido.

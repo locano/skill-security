@@ -1,0 +1,7 @@
+# Artefactos generados al correr el scan (no commitear tokens ni reportes).
+security-reports/security.config.yml
+security-reports/.sonar-admin
+security-reports/*.json
+security-reports/*.html
+!security-reports/security.config.example.yml
+.scannerwork/

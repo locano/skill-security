@@ -1,43 +1,162 @@
 #!/usr/bin/env bash
-# run-zap.sh — Ejecuta OWASP ZAP (baseline o active scan) contra una URL target
-# usando el contenedor oficial zaproxy/zap-stable, y exporta reporte HTML + JSON.
+# run-zap.sh — OWASP ZAP contra una URL web o una API.
 #
-# Uso:
-#   ./run-zap.sh <target_url> <scan_type: baseline|active> <output_dir>
+# Compat:
+#   ./run-zap.sh <target_url> <baseline|active> <output_dir>
+#     → zap-dast-report.{html,json}
 #
-# Requiere: docker
+# Flags:
+#   ./run-zap.sh --url URL --kind web|api [--scan-type baseline|active] \
+#                [--output-dir DIR] [--openapi FILE|URL] [--prefix NAME]
+#
+# API + OpenAPI → zap-api-scan.py. API sin spec → baseline (más débil).
+# localhost se reescribe a host.docker.internal.
 
 set -euo pipefail
 
-TARGET_URL="${1:?Uso: run-zap.sh <target_url> <baseline|active> <output_dir>}"
-SCAN_TYPE="${2:-baseline}"
-OUTPUT_DIR="${3:-security-reports}"
-IMAGE="zaproxy/zap-stable"
+TARGET_URL=""
+SCAN_TYPE="baseline"
+OUTPUT_DIR="security-reports"
+KIND="web"
+OPENAPI=""
+PREFIX=""
+IMAGE="${ZAP_DOCKER_IMAGE:-zaproxy/zap-stable}"
 
 log() { echo "[run-zap] $*" >&2; }
+
+usage() {
+  echo "Uso: run-zap.sh <url> [baseline|active] [output_dir]" >&2
+  echo "  o: run-zap.sh --url URL --kind web|api [--openapi FILE] [--prefix NAME]" >&2
+  exit 2
+}
+
+if [ $# -gt 0 ] && [[ "$1" == http://* || "$1" == https://* ]]; then
+  TARGET_URL="$1"
+  SCAN_TYPE="${2:-baseline}"
+  OUTPUT_DIR="${3:-security-reports}"
+  PREFIX="zap-dast-report"
+else
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --url) TARGET_URL="${2:-}"; shift ;;
+      --kind) KIND="${2:-web}"; shift ;;
+      --scan-type) SCAN_TYPE="${2:-baseline}"; shift ;;
+      --output-dir) OUTPUT_DIR="${2:-security-reports}"; shift ;;
+      --openapi) OPENAPI="${2:-}"; shift ;;
+      --prefix) PREFIX="${2:-}"; shift ;;
+      -h|--help) usage ;;
+      *) log "argumento desconocido: $1"; usage ;;
+    esac
+    shift
+  done
+fi
+
+if [ -z "$TARGET_URL" ] && [ -z "$OPENAPI" ]; then
+  log "Falta --url o --openapi."
+  usage
+fi
+
+if [ -z "$PREFIX" ]; then
+  if [ "$KIND" = "api" ]; then
+    PREFIX="zap-dast-api"
+  elif [ "$KIND" = "web" ]; then
+    PREFIX="zap-dast-web"
+  else
+    PREFIX="zap-dast-report"
+  fi
+fi
 
 mkdir -p "${OUTPUT_DIR}"
 ABS_OUTPUT_DIR="$(cd "${OUTPUT_DIR}" && pwd)"
 
-log "Target: ${TARGET_URL}"
-log "Tipo de scan: ${SCAN_TYPE}"
-
-if [ "$SCAN_TYPE" = "active" ]; then
-  SCRIPT="zap-full-scan.py"
-  log "ADVERTENCIA: active scan envía payloads de ataque reales al target."
-  log "Solo ejecutar contra ambientes dev/staging con autorización explícita."
-else
-  SCRIPT="zap-baseline.py"
+if ! command -v docker >/dev/null 2>&1; then
+  log "ERROR: Docker no está instalado."
+  exit 1
+fi
+if ! docker info >/dev/null 2>&1; then
+  log "ERROR: el daemon de Docker no está corriendo. En macOS: open -a Docker"
+  exit 1
 fi
 
+if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+  log "Descargando ${IMAGE} (puede tardar, ~1GB)..."
+  docker pull "$IMAGE" >&2
+fi
+
+rewrite_host() {
+  printf '%s' "$1" | sed -E 's#://(localhost|127\.0\.0\.1)(:|/)#://host.docker.internal\2#'
+}
+
+check_http() {
+  local url="$1"
+  local code
+  code="$(curl -s -o /dev/null -w "%{http_code}" --max-time 8 "${url}" || echo "000")"
+  if [ "$code" = "000" ]; then
+    log "ERROR: el target no responde (${url}). Tiene que estar corriendo. Localhost vale."
+    return 1
+  fi
+  log "Target responde HTTP ${code}."
+}
+
+ZAP_TARGET=""
+ZAP_SCRIPT=""
+ZAP_EXTRA=()
+
+if [ -n "$OPENAPI" ] && [ "$KIND" = "api" ]; then
+  ZAP_SCRIPT="zap-api-scan.py"
+  if [[ "$OPENAPI" == http://* || "$OPENAPI" == https://* ]]; then
+    check_http "$OPENAPI" || exit 1
+    ZAP_TARGET="$(rewrite_host "$OPENAPI")"
+  else
+    if [ ! -f "$OPENAPI" ]; then
+      log "ERROR: no existe el spec OpenAPI: ${OPENAPI}"
+      exit 1
+    fi
+    SPEC_NAME="$(basename "$OPENAPI")"
+    cp "$OPENAPI" "${ABS_OUTPUT_DIR}/${SPEC_NAME}"
+    ZAP_TARGET="/zap/wrk/${SPEC_NAME}"
+  fi
+  FMT="openapi"
+  case "${OPENAPI##*.}" in
+    json|yaml|yml)
+      base="$(basename "$OPENAPI" | tr '[:upper:]' '[:lower:]')"
+      if [[ "$base" == swagger* ]]; then FMT="swagger"; fi
+      ;;
+  esac
+  ZAP_EXTRA=(-f "$FMT")
+  log "API scan con spec ${OPENAPI} (formato ${FMT})."
+elif [ -n "$TARGET_URL" ]; then
+  check_http "$TARGET_URL" || exit 1
+  ZAP_TARGET="$(rewrite_host "$TARGET_URL")"
+  if [ "$ZAP_TARGET" != "$TARGET_URL" ]; then
+    log "Reescrito para Docker: ${TARGET_URL} → ${ZAP_TARGET}"
+  fi
+  if [ "$KIND" = "api" ]; then
+    log "API sin OpenAPI: baseline (cobertura más débil que zap-api-scan)."
+  fi
+  if [ "$SCAN_TYPE" = "active" ]; then
+    ZAP_SCRIPT="zap-full-scan.py"
+    log "ADVERTENCIA: active scan envía payloads de ataque reales."
+  else
+    ZAP_SCRIPT="zap-baseline.py"
+  fi
+else
+  log "ERROR: API scan requiere --openapi o --url."
+  exit 1
+fi
+
+log "Kind=${KIND} script=${ZAP_SCRIPT} target=${ZAP_TARGET} prefix=${PREFIX}"
+
 docker run --rm \
+  --add-host=host.docker.internal:host-gateway \
   -v "${ABS_OUTPUT_DIR}:/zap/wrk/:rw" \
   -t "${IMAGE}" \
-  ${SCRIPT} \
-  -t "${TARGET_URL}" \
-  -r zap-dast-report.html \
-  -J zap-dast-report.json \
+  ${ZAP_SCRIPT} \
+  -t "${ZAP_TARGET}" \
+  "${ZAP_EXTRA[@]+"${ZAP_EXTRA[@]}"}" \
+  -r "${PREFIX}.html" \
+  -J "${PREFIX}.json" \
   -I \
   || log "ZAP retornó código distinto de 0 (normal si encontró alertas)."
 
-log "Reportes generados en ${OUTPUT_DIR}/zap-dast-report.{html,json}"
+log "Reportes: ${OUTPUT_DIR}/${PREFIX}.{html,json}"

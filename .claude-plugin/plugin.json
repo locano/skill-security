@@ -1,0 +1,10 @@
+{
+  "name": "security-scan",
+  "description": "SAST + DAST + SCA + OWASP API Security Top 10 en cualquier repo: Bandit, pip-audit, npm audit, SonarQube y OWASP ZAP, con un reporte HTML final. Se instala una vez como plugin y queda disponible como /security-scan en todos los repos donde lo actives.",
+  "version": "0.1.0",
+  "author": {
+    "name": "locano"
+  },
+  "homepage": "https://locano.github.io/skill-security/",
+  "repository": "https://github.com/locano/skill-security"
+}
