@@ -154,7 +154,7 @@ prereq_flag() {
 
 run_prereqs() {
   local rc=0
-  bash "${SCRIPT_DIR}/check-prereqs.sh" "$@" || rc=$?
+  bash "${SCRIPT_DIR}/1-preflight/check-prereqs.sh" "$@" || rc=$?
   if [ "$rc" -eq 1 ]; then
     log "Preflight falló (falta python3). Abortando."
     exit 1
@@ -167,7 +167,7 @@ if [ -n "$ONLY" ]; then
 fi
 
 phase "1/6" "Inventario + preflight (inspección; pull según espacio)"
-python3 "${SCRIPT_DIR}/collect-inventory.py" "${OUTPUT_DIR}" || log "Inventario falló; se sigue."
+python3 "${SCRIPT_DIR}/1-preflight/collect-inventory.py" "${OUTPUT_DIR}" || log "Inventario falló; se sigue."
 
 if [ -z "$OPENAPI" ] && [ -f "${OUTPUT_DIR}/inventory.json" ]; then
   DETECTED="$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print((d.get('openapi') or [''])[0])" "${OUTPUT_DIR}/inventory.json" 2>/dev/null || true)"
@@ -177,15 +177,11 @@ if [ -z "$OPENAPI" ] && [ -f "${OUTPUT_DIR}/inventory.json" ]; then
   fi
 fi
 
-python3 - "$OUTPUT_DIR" "$HAS_DAST" <<'PY'
-import json, sys
-from pathlib import Path
-p = Path(sys.argv[1]) / "inventory.json"
-if p.exists():
-    data = json.loads(p.read_text(encoding="utf-8"))
-    data["dast_applies"] = sys.argv[2] == "1"
-    p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-PY
+# El inventario ya se escribió arriba con la heurística; ahora que sabemos si hay
+# URL real, lo reescribimos con el dato duro. collect-inventory.py toma el flag
+# como argv[2], así que hay un solo mecanismo y no dos que puedan divergir.
+python3 "${SCRIPT_DIR}/1-preflight/collect-inventory.py" "${OUTPUT_DIR}" "${HAS_DAST}" >/dev/null \
+  || log "Inventario (repaso DAST) falló; se sigue."
 
 INSPECT_ARGS=("${OUTPUT_DIR}" --no-pull)
 if ! want sonar; then
@@ -216,7 +212,8 @@ fi
 
 if want sast; then
 phase "2/6" "SAST + SCA local (Bandit / pip-audit / npm audit)"
-bash "${SCRIPT_DIR}/run-sast-sca.sh" "${OUTPUT_DIR}"
+bash "${SCRIPT_DIR}/2-sast/run-bandit.sh" "${OUTPUT_DIR}"
+bash "${SCRIPT_DIR}/3-sca/run-sca.sh" "${OUTPUT_DIR}"
 fi
 
 if want sonar; then
@@ -228,10 +225,10 @@ fi
 log "Si el scan falla, abrí igual: ${SONAR_DASHBOARD}"
 SONAR_READY="$(prereq_flag sonar_ready)"
 if [ "$SONAR_READY" = "true" ]; then
-  bash "${SCRIPT_DIR}/run-sonarqube.sh" "${PROJECT_KEY}" "${PROJECT_NAME}" "${OUTPUT_DIR}" "${PORT}" \
+  bash "${SCRIPT_DIR}/2-sast/run-sonarqube.sh" "${PROJECT_KEY}" "${PROJECT_NAME}" "${OUTPUT_DIR}" "${PORT}" \
     || log "SonarQube falló. Dashboard: ${SONAR_DASHBOARD}"
 else
-  python3 "${SCRIPT_DIR}/write-sonar-status.py" "${OUTPUT_DIR}" images_missing \
+  python3 "${SCRIPT_DIR}/2-sast/write-sonar-status.py" "${OUTPUT_DIR}" images_missing \
     "Docker/imágenes no listos. URL prevista: ${SONAR_DASHBOARD}" \
     "http://localhost:${PORT}" "${PROJECT_KEY}" || true
   log "SonarQube omitido. URL prevista: ${SONAR_DASHBOARD}"
@@ -254,30 +251,30 @@ elif [ "$ZAP_READY" != "true" ]; then
 else
   if [ -n "$WEB_URL" ] && [ -n "$API_URL" ]; then
     log "ZAP web → ${WEB_URL} (varios minutos)..."
-    bash "${SCRIPT_DIR}/run-zap.sh" --url "${WEB_URL}" --kind web --scan-type "${SCAN_TYPE}" \
+    bash "${SCRIPT_DIR}/4-dast/run-zap.sh" --url "${WEB_URL}" --kind web --scan-type "${SCAN_TYPE}" \
       --output-dir "${OUTPUT_DIR}" --prefix zap-dast-web \
       || log "ZAP web falló; se sigue."
     log "ZAP API → ${API_URL}..."
     API_ARGS=(--url "${API_URL}" --kind api --scan-type "${SCAN_TYPE}" --output-dir "${OUTPUT_DIR}" --prefix zap-dast-api)
     if [ -n "$OPENAPI" ]; then API_ARGS+=(--openapi "${OPENAPI}"); fi
-    bash "${SCRIPT_DIR}/run-zap.sh" "${API_ARGS[@]}" || log "ZAP API falló; se sigue."
+    bash "${SCRIPT_DIR}/4-dast/run-zap.sh" "${API_ARGS[@]}" || log "ZAP API falló; se sigue."
   elif [ -n "$API_URL" ] || [ -n "$OPENAPI" ]; then
     API_ARGS=(--kind api --scan-type "${SCAN_TYPE}" --output-dir "${OUTPUT_DIR}")
     if [ -n "$API_URL" ]; then API_ARGS+=(--url "${API_URL}"); fi
     if [ -n "$OPENAPI" ]; then API_ARGS+=(--openapi "${OPENAPI}"); fi
     if [ -z "$WEB_URL" ] && [ -n "$TARGET_URL" ] && [ -z "$API_URL" ]; then
-      bash "${SCRIPT_DIR}/run-zap.sh" "${TARGET_URL}" "${SCAN_TYPE}" "${OUTPUT_DIR}" || log "ZAP falló."
+      bash "${SCRIPT_DIR}/4-dast/run-zap.sh" "${TARGET_URL}" "${SCAN_TYPE}" "${OUTPUT_DIR}" || log "ZAP falló."
     else
       API_ARGS+=(--prefix zap-dast-api)
-      bash "${SCRIPT_DIR}/run-zap.sh" "${API_ARGS[@]}" || log "ZAP API falló."
+      bash "${SCRIPT_DIR}/4-dast/run-zap.sh" "${API_ARGS[@]}" || log "ZAP API falló."
     fi
   else
     # una sola URL web (incluye --target-url compat → zap-dast-report.json)
     if [ -n "$TARGET_URL" ] && [ "$WEB_URL" = "$TARGET_URL" ]; then
-      bash "${SCRIPT_DIR}/run-zap.sh" "${TARGET_URL}" "${SCAN_TYPE}" "${OUTPUT_DIR}" \
+      bash "${SCRIPT_DIR}/4-dast/run-zap.sh" "${TARGET_URL}" "${SCAN_TYPE}" "${OUTPUT_DIR}" \
         || log "ZAP falló; se sigue."
     else
-      bash "${SCRIPT_DIR}/run-zap.sh" --url "${WEB_URL}" --kind web --scan-type "${SCAN_TYPE}" \
+      bash "${SCRIPT_DIR}/4-dast/run-zap.sh" --url "${WEB_URL}" --kind web --scan-type "${SCAN_TYPE}" \
         --output-dir "${OUTPUT_DIR}" --prefix zap-dast-web \
         || log "ZAP web falló; se sigue."
     fi
@@ -286,10 +283,10 @@ fi
 fi
 
 phase "5/6" "Mapeo OWASP Top 10 / API Top 10"
-python3 "${SCRIPT_DIR}/map-owasp.py" "${OUTPUT_DIR}" || log "map-owasp falló."
+python3 "${SCRIPT_DIR}/5-report/map-owasp.py" "${OUTPUT_DIR}" || log "map-owasp falló."
 
 phase "6/6" "Reporte HTML (con lo que haya hasta ahora)"
-python3 "${SCRIPT_DIR}/generate-report-template.py" "${OUTPUT_DIR}"
+python3 "${SCRIPT_DIR}/5-report/generate-report-template.py" "${OUTPUT_DIR}"
 
 echo "" >&2
 log "Listo. HTML: ${OUTPUT_DIR}/security-report-completo.html"
@@ -300,8 +297,12 @@ fi
 if [ "$ONE_BY_ONE" -eq 1 ] && [ -z "$ONLY" ]; then
   log "Se corrió 1 por 1 por espacio. Si algo se omitió, repetí esa fase con --only."
 fi
+SONAR_GLOBAL_PW="${XDG_CONFIG_HOME:-$HOME/.config}/skill-security/sonar-admin-${PORT}"
 if [ -f "${OUTPUT_DIR}/.sonar-admin" ] && [ -s "${OUTPUT_DIR}/.sonar-admin" ]; then
   SONAR_PASS="$(cat "${OUTPUT_DIR}/.sonar-admin")"
+elif [ -f "$SONAR_GLOBAL_PW" ] && [ -s "$SONAR_GLOBAL_PW" ]; then
+  # Otro proyecto ya levantó este mismo contenedor y dejó la password acá.
+  SONAR_PASS="$(cat "$SONAR_GLOBAL_PW")"
 else
   SONAR_PASS="Security_Scan_$(date +%Y)!"
 fi

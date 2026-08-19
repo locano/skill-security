@@ -60,7 +60,7 @@ note() { NOTES+=("$1"); }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 write_sonar_status() {
-  python3 "${SCRIPT_DIR}/write-sonar-status.py" "${OUTPUT_DIR}" "$1" "$2" "http://localhost:9000" "" || true
+  python3 "${SCRIPT_DIR}/../2-sast/write-sonar-status.py" "${OUTPUT_DIR}" "$1" "$2" "http://localhost:9000" "" || true
 }
 
 has_cmd() { command -v "$1" >/dev/null 2>&1; }

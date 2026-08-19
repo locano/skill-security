@@ -73,19 +73,29 @@ Detalle: [scripts/security/README.md](scripts/security/README.md).
 
 ## Estructura
 
+Los scripts están agrupados por tipo de análisis, y el número es el orden en
+que corren:
+
 ```
 .claude-plugin/plugin.json
 skills/skill-security-scan/SKILL.md      instrucciones del agente (fases + URL Sonar)
 scripts/security/
   run-scan.sh                            orquestador CLI con banners [1/6]…[6/6]
-  collect-inventory.py                   web / api / serverless / OpenAPI
-  check-prereqs.sh                       Docker + pull
-  write-sonar-status.py                  sonar-status.json (URL siempre)
-  setup-sonarqube.sh / run-sonarqube.sh
-  run-zap.sh                             --web/--api/--openapi o URL única
-  run-sast-sca.sh
-  map-owasp.py                           Top 10 web + API
-  generate-report-template.py
+  1-preflight/                           ¿qué es este repo y qué se puede correr?
+    collect-inventory.py                 web / api / serverless / OpenAPI
+    check-prereqs.sh                     Docker, imágenes, espacio en disco
+  2-sast/                                análisis estático: se lee el código
+    run-bandit.sh                        patrones inseguros en Python
+    setup-sonarqube.sh                   levanta el contenedor y crea el proyecto
+    run-sonarqube.sh                     corre el scanner y exporta los issues
+    write-sonar-status.py                sonar-status.json (URL siempre)
+  3-sca/                                 dependencias de terceros con CVE
+    run-sca.sh                           pip-audit + npm audit
+  4-dast/                                análisis dinámico: se ataca la app viva
+    run-zap.sh                           --web/--api/--openapi o URL única
+  5-report/                              correlación y entregable
+    map-owasp.py                         Top 10 web + API
+    generate-report-template.py          HTML: web para revisar, Cmd+P para PDF
 security-reports/security.config.example.yml
 index.html
 ```

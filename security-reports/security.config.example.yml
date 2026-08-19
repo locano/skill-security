@@ -34,14 +34,37 @@ sca:
   pip_audit: true
 
 # --- Branding del reporte HTML ---
+# Sin branding el reporte usa la identidad del skill (navy + acento del landing).
 branding:
-  enabled: false # true para aplicar colores/logo custom
-  primary_color: "#000038"
-  secondary_color: "#00377d"
-  accent_color: "#00c8ff"
-  font_family: "Calibri, Arial, sans-serif"
+  enabled: false # true para aplicar colores custom
+  primary_color: "#0a1628" # banda superior, títulos
+  secondary_color: "#091235" # subtítulos
+  accent_color: "#6ca3ce" # regla bajo los títulos, enlaces
+  font_family: "" # vacío = Poppins/Montserrat con fallback del sistema
   company_name: ""
-  logo_path: "" # ruta a PNG/SVG local, opcional
+  logo_path: "" # sin uso: el encabezado es deliberadamente sin logo
+
+# --- Metadatos del documento ---
+# Los pregunta el skill en el paso 1 y los escribe acá. Todo campo vacío
+# simplemente no se muestra: no quedan filas con "—" de relleno.
+report:
+  report_type: "Reporte de Seguridad de Aplicaciones"
+  classification: "Uso Interno · Confidencial"
+  prepared_by: "" # "Nombre — Equipo". Vacío = fila oculta
+  document_version: "1.0"
+  status_label: "" # vacío = se deriva de los hallazgos (ej. "3 hallazgos P1")
+  analysis_date: "" # dd/mm/aaaa. Vacío = fecha de generación
+  endpoint: "" # vacío = se toma de zap.web_url / zap.api_url
+  infrastructure: "" # "AWS Lambda + API Gateway". Vacío = fila oculta
+  code_scope: "" # vacío = se deriva de inventory.json (stacks + carpetas)
+  tool_versions: {} # opcional: { "OWASP ZAP": "2.17.0", "Bandit": "1.9.4" }
+
+# --- Narrativa del informe (archivos aparte, los escribe el agente) ---
+# security-reports/assessment.json     veredicto + alcance/limitaciones
+# security-reports/remediation-plan.json  acción, responsable, fecha e impacto
+# security-reports/owasp-review.json   revisión manual de autorización
+# Los tres son opcionales: sin ellos el reporte se genera igual, derivando
+# el veredicto de los hallazgos P1.
 
 # --- Salida ---
 output:

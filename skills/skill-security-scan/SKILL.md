@@ -35,17 +35,43 @@ Si el contenedor es virgen y todavía no corrió el setup: `admin` / `admin`.
 1. **Preguntar** (nunca asumir):
    - Nombre del proyecto. Key en kebab-case si no la da.
    - Branding custom o default.
-   - URLs **opcionales**: `--web-url` y/o `--api-url` (localhost vale; tiene
-     que estar corriendo). Serverless: no insistas en URL; si da API Gateway
-     o `sam local`, usala como API. Nunca producción sin confirmación.
+   - **URLs: preguntá SIEMPRE por las dos, y por separado.** Web y API suelen
+     vivir en hosts o puertos distintos (`localhost:3000` y `localhost:8000`,
+     o dominios diferentes), así que **nunca asumas que una sirve para las dos**
+     ni reutilices la que te dieron para la otra. Preguntá literalmente:
+     - ¿URL del front/web? (`--web-url`)
+     - ¿URL de la API? (`--api-url`)
+
+     Aceptá que respondan "no tengo" o "no aplica" a cualquiera de las dos: ahí
+     esa queda vacía y ZAP simplemente no la escanea. Lo que no vale es no
+     preguntar. Si da una sola, **confirmá explícitamente** que la otra no
+     existe antes de seguir — es la diferencia entre "no hay front" y "me
+     olvidé de mencionarlo".
+
+     localhost vale, pero tiene que estar corriendo. En serverless, si da un
+     API Gateway o `sam local`, esa es la API. **Nunca producción sin
+     confirmación explícita.**
    - Active scan solo si lo pide (default `baseline`).
+   - **Metadatos del documento** (para la portada). Preguntalos de una sola vez,
+     y aclarale que puede dejar en blanco lo que no sepa — un campo vacío no se
+     muestra, no queda una fila con guión:
+     - Preparado por (nombre / equipo)
+     - Versión del documento (default `1.0`)
+     - Infraestructura (ej. "AWS Lambda + API Gateway")
+
+     El endpoint del encabezado se arma solo con las URLs de arriba; no lo
+     vuelvas a preguntar salvo que quiera mostrar algo distinto en la portada.
+
+   Escribí las respuestas en `security-reports/security.config.yml` bajo la clave
+   `report:` (`prepared_by`, `document_version`, `infrastructure`, `endpoint`).
+   `run-scan.sh` no toca ese bloque, así que sobrevive a cada corrida.
 
 2. **Inventario + preflight** — avisá: “detecto el stack; si falta Docker
    bajo imágenes (~1GB)”.
 
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/security/collect-inventory.py" security-reports
-   bash "${CLAUDE_PLUGIN_ROOT}/scripts/security/check-prereqs.sh" security-reports [--with-zap]
+   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/security/1-preflight/collect-inventory.py" security-reports
+   bash "${CLAUDE_PLUGIN_ROOT}/scripts/security/1-preflight/check-prereqs.sh" security-reports [--with-zap]
    ```
 
    `--with-zap` solo si hay alguna URL. Leé `inventory.json` y decile al
@@ -76,18 +102,24 @@ Si el contenedor es virgen y todavía no corrió el setup: `admin` / `admin`.
 
    `--one-by-one` en `run-scan.sh` hace el mismo orden (pull por fase).
 
-3. **SAST local** — “Bandit / npm audit / pip-audit, segundos”.
+3. **SAST + SCA local** — “Bandit sobre el código y auditoría de dependencias,
+   segundos”. Son dos análisis distintos y ahora dos scripts:
 
    ```bash
-   bash "${CLAUDE_PLUGIN_ROOT}/scripts/security/run-sast-sca.sh" security-reports
+   # SAST: patrones inseguros en el código Python
+   bash "${CLAUDE_PLUGIN_ROOT}/scripts/security/2-sast/run-bandit.sh" security-reports
+   # SCA: dependencias de terceros con CVE (pip-audit + npm audit)
+   bash "${CLAUDE_PLUGIN_ROOT}/scripts/security/3-sca/run-sca.sh" security-reports
    ```
+
+   Cada uno se saltea solo si no aplica (sin archivos `.py`, sin manifiestos).
 
 4. **SonarQube** — “primer arranque 1–2 min. Dashboard:
    `http://localhost:9000/dashboard?id=<key>`”. Si `prereqs.json` tiene
    `sonar_ready`, corré:
 
    ```bash
-   bash "${CLAUDE_PLUGIN_ROOT}/scripts/security/run-sonarqube.sh" <key> "<nombre>" security-reports
+   bash "${CLAUDE_PLUGIN_ROOT}/scripts/security/2-sast/run-sonarqube.sh" <key> "<nombre>" security-reports
    ```
 
    Si falla o no está listo, igual pegá la URL prevista y el `reason` de
@@ -97,10 +129,10 @@ Si el contenedor es virgen y todavía no corrió el setup: `admin` / `admin`.
 
    ```bash
    # una URL (compat):
-   bash "${CLAUDE_PLUGIN_ROOT}/scripts/security/run-zap.sh" <url> baseline security-reports
+   bash "${CLAUDE_PLUGIN_ROOT}/scripts/security/4-dast/run-zap.sh" <url> baseline security-reports
    # web + api:
-   bash "${CLAUDE_PLUGIN_ROOT}/scripts/security/run-zap.sh" --url <web> --kind web --output-dir security-reports --prefix zap-dast-web
-   bash "${CLAUDE_PLUGIN_ROOT}/scripts/security/run-zap.sh" --url <api> --kind api [--openapi spec] --output-dir security-reports --prefix zap-dast-api
+   bash "${CLAUDE_PLUGIN_ROOT}/scripts/security/4-dast/run-zap.sh" --url <web> --kind web --output-dir security-reports --prefix zap-dast-web
+   bash "${CLAUDE_PLUGIN_ROOT}/scripts/security/4-dast/run-zap.sh" --url <api> --kind api [--openapi spec] --output-dir security-reports --prefix zap-dast-api
    ```
 
    Si `inventory.json` trae `openapi` y no dieron spec, usalo. Sin URL:
@@ -109,7 +141,7 @@ Si el contenedor es virgen y todavía no corrió el setup: `admin` / `admin`.
 6. **OWASP + HTML**
 
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/security/map-owasp.py" security-reports
+   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/security/5-report/map-owasp.py" security-reports
    ```
 
    Después leé handlers/rutas del repo (sin escribir exploits) y completá
@@ -121,14 +153,99 @@ Si el contenedor es virgen y todavía no corrió el setup: `admin` / `admin`.
    {"items":[{"id":"API1:2023","status":"pass|fail|parcial","evidence":"archivo:línea …"}]}
    ```
 
-   Volvé a correr `map-owasp.py` y después:
+   Volvé a correr `map-owasp.py`.
+
+   **Plan de remediación** (opcional pero es lo que más valora quien lee el
+   reporte). La sección se genera **siempre**: el generador clasifica cada
+   hallazgo en P1 (crítico/alto), P2 (medio) y P3 (bajo/calidad) por severidad.
+   Lo que vos agregás es lo que ninguna herramienta sabe: qué hacer, quién y
+   cuándo. Escribí `security-reports/remediation-plan.json`:
+
+   ```json
+   {
+     "defaults": {"owner": "Equipo Backend"},
+     "items": [
+       {"id": "bandit:B307:app/handler.py:127", "priority": "P1",
+        "status": "cerrado", "action": "Reemplazado por _safe_eval() con AST.",
+        "owner": "Ludwing", "eta": "2026-08-20",
+        "before": "eval(v)", "after": "_safe_eval(v)"},
+       {"match": {"source": "npm", "severity": "low"}, "status": "aceptado",
+        "action": "Dependencias de build, no llegan a runtime."}
+     ],
+     "extra": [
+       {"id": "manual:jwt-exp", "priority": "P2", "title": "JWT sin expiración",
+        "location": "src/auth/token.ts:31", "severity": "medium",
+        "action": "Reducir exp a 15 min."}
+     ],
+     "notes": ["Revisión manual del <fecha>."]
+   }
+   ```
+
+   Formatos de `id` (salen del propio reporte; son la clave del override):
+
+   | Fuente | `id` |
+   |---|---|
+   | Bandit | `bandit:{test_id}:{archivo}:{línea}` |
+   | npm audit | `npm:{paquete}` |
+   | pip-audit | `pip:{paquete}:{vuln_id}` |
+   | ZAP | `zap:{web\|api\|single}:{pluginid}` |
+   | SonarQube | `sonar:{key del issue}` |
+   | OWASP | `owasp:{id}` — ej. `owasp:API1:2023` |
+
+   Reglas: `id` exacto pisa todo, incluida la prioridad (podés subir un medio a
+   P1). `match` aplica a varios a la vez pero **nunca** pisa un `id` explícito.
+   `hide: true` saca una fila. `extra[]` agrega hallazgos que ninguna herramienta
+   detectó. Un `id` que ya no existe **no se descarta**: sale marcado como
+   huérfano para que lo actualices. Estados: `abierto`, `cerrado`, `parcial`,
+   `planificado`, `aceptado`.
+
+   **Dictamen y alcance** (`security-reports/assessment.json`, opcional). Es lo
+   que convierte un volcado de datos en un informe. El reporte se genera igual
+   sin esto —el veredicto se deriva de los P1— pero tu lectura vale más:
+
+   ```json
+   {
+     "verdict": {
+       "status": "no-apto | reservas | apto",
+       "summary": "Una o dos frases con postura, no un resumen de conteos.",
+       "reasons": ["Razón concreta 1", "Razón 2", "Razón 3"],
+       "to_change": "Qué tiene que pasar para que el dictamen cambie."
+     },
+     "scope": {
+       "tested": ["Qué se probó realmente"],
+       "not_tested": ["Qué quedó afuera y por qué"]
+     }
+   }
+   ```
+
+   Sé honesto en `not_tested`: declarar los límites es lo que separa un informe
+   con rigor de uno que se presenta como exhaustivo sin serlo. Si ZAP corrió sin
+   credenciales, la superficie autenticada **no** se probó y hay que decirlo.
+
+   **Impacto de negocio** — a cada ítem P1 de `remediation-plan.json` agregale un
+   campo `impact` que traduzca el hallazgo a consecuencia real para *este*
+   producto: qué dato se expone, a quién, y qué implica. No repitas la
+   descripción técnica; el lector ejecutivo ya la tiene arriba.
+
+   ```json
+   {"id": "...", "priority": "P1",
+    "impact": "Cualquier usuario autenticado puede leer el perfil completo de otro, incluyendo CV y datos de contacto."}
+   ```
+
+   Después generá el HTML:
 
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/security/generate-report-template.py" security-reports
+   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/security/5-report/generate-report-template.py" security-reports
    ```
 
 7. Cierre: HTML en `security-reports/security-report-completo.html`, resumen
    por severidad, **siempre** el link de SonarQube, qué se omitió.
+
+   Decile además que el HTML sirve para las dos cosas: **abrirlo en el navegador**
+   para revisar (índice lateral, filtros por severidad, buscador) y **Cmd+P →
+   Guardar como PDF** para el documento paginado. Y que la última sección enlaza
+   los reportes crudos de cada herramienta, por si quieren consultar un detalle
+   puntual.
 
 Atajo CLI (humanos): `run-scan.sh` hace las fases 2–6 con banners. El skill
 debe ir fase por fase para que el usuario vea progreso.

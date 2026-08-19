@@ -9,7 +9,7 @@
       "name": "lc2tech",
       "source": "./",
       "description": "SAST + DAST + SCA + OWASP API Security Top 10 en cualquier repo, con reporte HTML final.",
-      "version": "0.1.0"
+      "version": "0.3.0"
     }
   ]
 }

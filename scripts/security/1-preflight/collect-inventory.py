@@ -10,6 +10,7 @@ Escribe inventory.json. No valida “orden de carpetas”; solo describe qué ha
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -107,6 +108,19 @@ def main():
     if not kinds:
         kinds.append("code")
 
+    # ¿El proyecto expone HTTP? Es una propiedad del código, no del scan.
+    http_surface = bool(openapi or folder_hints["api"] or folder_hints["web"]
+                        or "api" in kinds or "web" in kinds)
+    # ¿Hay además una URL viva para ZAP? La pasa run-scan.sh (argv[2]) o el env.
+    # Sin dato explícito no afirmamos False: caemos a lo que sugiere el código.
+    flag = sys.argv[2] if len(sys.argv) > 2 else os.environ.get("SECURITY_DAST_APPLIES", "")
+    if flag in ("1", "true", "yes"):
+        dast_applies = True
+    elif flag in ("0", "false", "no"):
+        dast_applies = False
+    else:
+        dast_applies = http_surface
+
     stacks = []
     if has_pkg:
         stacks.append("node")
@@ -134,10 +148,17 @@ def main():
         "openapi": openapi,
         "serverless_markers": serverless_markers,
         "folder_hints": folder_hints,
-        "dast_applies": False,
+        # Dos cosas distintas que antes se confundían en un solo flag:
+        #  - http_surface: el proyecto expone HTTP (se deduce del código)
+        #  - dast_applies: además hay una URL viva contra la cual correr ZAP
+        # run-scan.sh parcha dast_applies con la URL real; el skill llama a este
+        # script directo, así que sin el argumento caemos a la heurística en vez
+        # de afirmar False y hacer que el reporte mienta.
+        "http_surface": http_surface,
+        "dast_applies": dast_applies,
         "notes": [
             "Inventario descriptivo: no valida el orden de carpetas del proyecto.",
-            "SAST cubre toda la carpeta. DAST solo si hay URL HTTP.",
+            "SAST cubre toda la carpeta. DAST solo si hay URL HTTP alcanzable.",
         ],
     }
     OUT_DIR.mkdir(parents=True, exist_ok=True)

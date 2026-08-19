@@ -146,6 +146,46 @@ Path(out_path).write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8"
 print(f"[run-sonarqube] escrito {out_path}")
 PY
 
+# --- Detalle por issue ------------------------------------------------------
+# Los contadores agregados no sirven para consultar "¿qué había en tal archivo?".
+# Ese detalle vive solo en el servidor, que muere con el contenedor y además
+# escucha en localhost — inútil para quien reciba el reporte. Lo exportamos.
+# Nunca aborta el scan: si falla, escribe una lista vacía y sigue.
+export_paged() {
+  api_path="$1"; param="$2"; out_file="$3"; collection="$4"
+  python3 - "${SONAR_URL}" "${TOKEN}" "${PROJECT_KEY}" \
+             "${api_path}" "${param}" "${OUTPUT_DIR}/${out_file}" "${collection}" <<'PY'
+import base64, json, sys, urllib.error, urllib.request
+from pathlib import Path
+
+url, token, key, api_path, param, out_path, collection = sys.argv[1:8]
+auth = base64.b64encode(f"{token}:".encode()).decode()
+items, page, total = [], 1, None
+
+try:
+    while page <= 20:  # tope duro: 20 x 500 = 10.000 issues
+        req = urllib.request.Request(
+            f"{url}{api_path}?{param}={key}&ps=500&p={page}",
+            headers={"Authorization": f"Basic {auth}"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            data = json.loads(r.read().decode())
+        batch = data.get(collection) or []
+        items.extend(batch)
+        total = data.get("total", data.get("paging", {}).get("total"))
+        if not batch or (total is not None and len(items) >= int(total)):
+            break
+        page += 1
+except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError) as exc:
+    print(f"[run-sonarqube] AVISO: no se pudo exportar {collection}: {exc}", file=sys.stderr)
+
+Path(out_path).write_text(json.dumps(items, indent=2) + "\n", encoding="utf-8")
+print(f"[run-sonarqube] escrito {out_path} ({len(items)} {collection})")
+PY
+}
+
+export_paged "/api/issues/search" "componentKeys" "sonarqube-issues.json" "issues" || true
+export_paged "/api/hotspots/search" "projectKey" "sonarqube-hotspots.json" "hotspots" || true
+
 QG_STATUS="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('quality_gate','NONE'))" "${SUMMARY_PATH}" 2>/dev/null || echo "NONE")"
 if [ "$QG_STATUS" = "NONE" ]; then
   write_status scan_failed "El scanner corrió pero Sonar no tiene análisis (quality gate NONE). Ver ${SCAN_LOG}. ${SONAR_URL}/dashboard?id=${PROJECT_KEY}"

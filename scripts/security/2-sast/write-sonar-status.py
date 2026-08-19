@@ -6,6 +6,7 @@ Uso:
 """
 
 import json
+import os
 import sys
 from datetime import date
 from pathlib import Path
@@ -18,10 +19,32 @@ project_key = sys.argv[5] if len(sys.argv) > 5 else ""
 
 out_dir.mkdir(parents=True, exist_ok=True)
 admin_file = out_dir / ".sonar-admin"
-if admin_file.is_file() and admin_file.stat().st_size:
-    password = admin_file.read_text(encoding="utf-8").strip()
-else:
-    password = f"Security_Scan_{date.today().year}!"
+
+# El contenedor de SonarQube es uno por máquina, pero .sonar-admin vive dentro
+# de cada proyecto. Si este repo todavía no lo tiene, la password real puede
+# estar en el store global que escribió otro proyecto.
+port = url.rsplit(":", 1)[-1].rstrip("/") if url else "9000"
+if not port.isdigit():
+    port = "9000"
+global_file = (
+    Path(os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config"))
+    / "skill-security" / f"sonar-admin-{port}"
+)
+
+
+def read_pass(path):
+    try:
+        if path.is_file() and path.stat().st_size:
+            return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        pass
+    return ""
+
+
+password = read_pass(admin_file) or read_pass(global_file) \
+    or f"Security_Scan_{date.today().year}!"
+password_file = str(admin_file if read_pass(admin_file) else
+                    (global_file if read_pass(global_file) else admin_file))
 
 dashboard = f"{url}/dashboard?id={project_key}" if url and project_key else url
 payload = {
@@ -32,7 +55,7 @@ payload = {
     "project_key": project_key,
     "login": "admin",
     "password": password,
-    "password_file": str(admin_file),
+    "password_file": password_file,
 }
 path = out_dir / "sonar-status.json"
 path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")

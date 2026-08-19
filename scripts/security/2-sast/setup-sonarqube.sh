@@ -7,7 +7,8 @@
 #
 # Variables de entorno:
 #   SECURITY_OUTPUT_DIR   directorio para .sonar-admin (default: security-reports)
-#   SONAR_ADMIN_PASSWORD  password admin a setear en el primer arranque
+#   SONAR_ADMIN_PASSWORD  password admin: se prueba como credencial existente
+#                         y, si el contenedor es nuevo, es la que queda seteada
 #   SONAR_DOCKER_IMAGE    imagen (default: sonarqube:community)
 #
 # Salida (stdout):
@@ -25,7 +26,10 @@ SONAR_URL="http://localhost:${PORT}"
 IMAGE="${SONAR_DOCKER_IMAGE:-sonarqube:community}"
 OUTPUT_DIR="${SECURITY_OUTPUT_DIR:-security-reports}"
 DEFAULT_ADMIN_PASS="admin"
-NEW_ADMIN_PASS="${SONAR_ADMIN_PASSWORD:-Security_Scan_$(date +%Y)!}"
+# Password que queremos que quede si el contenedor es virgen. Ojo: NO es
+# necesariamente la que el contenedor ya tiene — para eso está la lista de
+# candidatas más abajo.
+TARGET_ADMIN_PASS="${SONAR_ADMIN_PASSWORD:-Security_Scan_$(date +%Y)!}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 log() { echo "[setup-sonarqube] $*" >&2; }
@@ -52,6 +56,13 @@ fi
 
 mkdir -p "${OUTPUT_DIR}"
 ADMIN_FILE="${OUTPUT_DIR}/.sonar-admin"
+
+# El contenedor es uno solo por máquina, pero .sonar-admin vive dentro de cada
+# proyecto. Sin un store global, el segundo proyecto que reutiliza el mismo
+# SonarQube no encuentra la password y se queda afuera. Por eso se guarda
+# también acá, fuera del repo y sin depender de /tmp (que se limpia).
+GLOBAL_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/skill-security"
+GLOBAL_FILE="${GLOBAL_DIR}/sonar-admin-${PORT}"
 OLD_FLAG="/tmp/.sonar_pw_changed_${PORT}"
 if [ ! -f "$ADMIN_FILE" ] && [ -f "$OLD_FLAG" ] && [ -s "$OLD_FLAG" ]; then
   cp "$OLD_FLAG" "$ADMIN_FILE"
@@ -94,27 +105,74 @@ for i in $(seq 1 60); do
 done
 log "Dashboard: ${SONAR_URL}/dashboard?id=${PROJECT_KEY}"
 
-AUTH=""
-if [ -f "$ADMIN_FILE" ] && [ -s "$ADMIN_FILE" ]; then
-  NEW_ADMIN_PASS="$(cat "$ADMIN_FILE")"
-  if curl -s -u "admin:${NEW_ADMIN_PASS}" "${SONAR_URL}/api/authentication/validate" | jq -e '.valid == true' >/dev/null 2>&1; then
-    AUTH="admin:${NEW_ADMIN_PASS}"
+# --- Autenticación ----------------------------------------------------------
+# Se prueban todas las credenciales plausibles, de la más explícita a la menos.
+# SONAR_ADMIN_PASSWORD va primero: si el usuario la pasa, es porque la sabe.
+try_auth() {
+  curl -s -u "admin:$1" "${SONAR_URL}/api/authentication/validate" \
+    | jq -e '.valid == true' >/dev/null 2>&1
+}
+
+save_pass() {
+  printf '%s\n' "$1" > "$ADMIN_FILE"
+  chmod 600 "$ADMIN_FILE" 2>/dev/null || true
+  mkdir -p "$GLOBAL_DIR" 2>/dev/null || true
+  if printf '%s\n' "$1" > "$GLOBAL_FILE" 2>/dev/null; then
+    chmod 600 "$GLOBAL_FILE" 2>/dev/null || true
   fi
+}
+
+CANDIDATES=()
+[ -n "${SONAR_ADMIN_PASSWORD:-}" ] && CANDIDATES+=("$SONAR_ADMIN_PASSWORD")
+[ -f "$ADMIN_FILE" ] && [ -s "$ADMIN_FILE" ] && CANDIDATES+=("$(cat "$ADMIN_FILE")")
+[ -f "$GLOBAL_FILE" ] && [ -s "$GLOBAL_FILE" ] && CANDIDATES+=("$(cat "$GLOBAL_FILE")")
+# Estas dos van siempre, así el array nunca queda vacío (bash 3.2 + set -u).
+CANDIDATES+=("$TARGET_ADMIN_PASS")
+CANDIDATES+=("$DEFAULT_ADMIN_PASS")
+
+AUTH=""
+FOUND_PASS=""
+TRIED=""
+for pw in "${CANDIDATES[@]}"; do
+  [ -n "$pw" ] || continue
+  case "$TRIED" in *"[$pw]"*) continue ;; esac   # no reintentar la misma
+  TRIED="${TRIED}[$pw]"
+  if try_auth "$pw"; then
+    FOUND_PASS="$pw"
+    break
+  fi
+done
+
+if [ -z "$FOUND_PASS" ]; then
+  log "ERROR: ninguna credencial de admin funcionó en ${SONAR_URL}."
+  log "  Probé: SONAR_ADMIN_PASSWORD (si estaba), ${ADMIN_FILE}, ${GLOBAL_FILE},"
+  log "  la default por año y admin/admin."
+  log "  Si sabés la password, reintentá con:"
+  log "    SONAR_ADMIN_PASSWORD='tu-password' <este script> ..."
+  log "  Si la perdiste, borrá el contenedor y empezá limpio:"
+  log "    docker rm -f ${CONTAINER_NAME}"
+  write_status scan_failed "No se pudo autenticar como admin en ${SONAR_URL}."
+  exit 1
 fi
 
-if [ -z "$AUTH" ]; then
-  if curl -s -u "admin:${DEFAULT_ADMIN_PASS}" "${SONAR_URL}/api/authentication/validate" | jq -e '.valid == true' >/dev/null 2>&1; then
-    log "Cambiando password por defecto y guardándola en ${ADMIN_FILE}..."
-    curl -s -u "admin:${DEFAULT_ADMIN_PASS}" -X POST "${SONAR_URL}/api/users/change_password" \
-      -d "login=admin&previousPassword=${DEFAULT_ADMIN_PASS}&password=${NEW_ADMIN_PASS}" >/dev/null
-    printf '%s\n' "$NEW_ADMIN_PASS" > "$ADMIN_FILE"
-    chmod 600 "$ADMIN_FILE" 2>/dev/null || true
-    AUTH="admin:${NEW_ADMIN_PASS}"
+if [ "$FOUND_PASS" = "$DEFAULT_ADMIN_PASS" ]; then
+  # Contenedor virgen: rotamos la password por defecto a la que corresponde.
+  log "Contenedor nuevo: cambiando la password por defecto..."
+  curl -s -u "admin:${DEFAULT_ADMIN_PASS}" -X POST "${SONAR_URL}/api/users/change_password" \
+    --data-urlencode "login=admin" \
+    --data-urlencode "previousPassword=${DEFAULT_ADMIN_PASS}" \
+    --data-urlencode "password=${TARGET_ADMIN_PASS}" >/dev/null
+  if try_auth "$TARGET_ADMIN_PASS"; then
+    FOUND_PASS="$TARGET_ADMIN_PASS"
   else
-    log "ERROR: no se pudo autenticar como admin. Borrá el contenedor ${CONTAINER_NAME} y reintentá, o definí SONAR_ADMIN_PASSWORD."
-    exit 1
+    log "AVISO: el cambio de password no tomó; sigo con admin/admin."
   fi
+else
+  log "Reutilizando SonarQube existente con la password ya conocida."
 fi
+
+save_pass "$FOUND_PASS"
+AUTH="admin:${FOUND_PASS}"
 
 EXISTS=$(curl -s -u "${AUTH}" "${SONAR_URL}/api/projects/search?projects=${PROJECT_KEY}" | jq -r '.components | length')
 if [ "$EXISTS" = "0" ]; then
@@ -138,10 +196,11 @@ write_status up "SonarQube UP. Dashboard: ${SONAR_URL}/dashboard?id=${PROJECT_KE
 log "────────────────────────────────────────"
 log "SonarQube: ${SONAR_URL}/dashboard?id=${PROJECT_KEY}"
 log "Usuario:   admin"
-log "Password:  ${NEW_ADMIN_PASS}"
+log "Password:  ${FOUND_PASS}"
 log "Archivo:   ${ADMIN_FILE}"
+log "Global:    ${GLOBAL_FILE}"
 log "────────────────────────────────────────"
 echo "SONAR_URL=${SONAR_URL}"
 echo "TOKEN=${TOKEN}"
 echo "SONAR_LOGIN=admin"
-echo "SONAR_PASSWORD=${NEW_ADMIN_PASS}"
+echo "SONAR_PASSWORD=${FOUND_PASS}"
