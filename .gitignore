@@ -5,3 +5,8 @@ security-reports/*.json
 security-reports/*.html
 !security-reports/security.config.example.yml
 .scannerwork/
+
+# OS / editor junk
+.DS_Store
+__pycache__/
+*.pyc
