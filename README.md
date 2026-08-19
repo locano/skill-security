@@ -1,4 +1,4 @@
-# /security-scan
+# /skill-security-scan
 
 Skill de [Claude Code](https://claude.com/claude-code) que analiza **cualquier
 repo** (web, API, serverless o mixto): SAST de toda la carpeta, DAST solo si
@@ -37,12 +37,17 @@ En Claude Code:
 
 ```
 /plugin marketplace add ~/skill-security
-/plugin install security-scan@skill-security
+/plugin install lc2tech@skill-security
 ```
 
-En cualquier repo: `/security-scan` o “corre un security scan”. El agente
-pregunta el nombre y URLs opcionales, y **avisa cada fase** (no se queda
-callado 15 minutos).
+En cualquier repo: `/skill-security-scan` o “corre un security scan”. El
+agente pregunta el nombre y URLs opcionales, y **avisa cada fase** (no se
+queda callado 15 minutos).
+
+> El nombre completo del comando es `/lc2tech:skill-security-scan`
+> (namespace del plugin + skill). El alias corto `/skill-security-scan` se
+> registra solo si ningún otro plugin instalado ya reclama ese nombre; si
+> eso pasa, usá la forma completa.
 
 A mano, desde la raíz del repo a analizar:
 
@@ -70,7 +75,7 @@ Detalle: [scripts/security/README.md](scripts/security/README.md).
 
 ```
 .claude-plugin/plugin.json
-skills/security-scan/SKILL.md            instrucciones del agente (fases + URL Sonar)
+skills/skill-security-scan/SKILL.md      instrucciones del agente (fases + URL Sonar)
 scripts/security/
   run-scan.sh                            orquestador CLI con banners [1/6]…[6/6]
   collect-inventory.py                   web / api / serverless / OpenAPI

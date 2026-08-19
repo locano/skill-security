@@ -1,11 +1,12 @@
 {
   "name": "skill-security",
+  "description": "Marketplace con el plugin lc2tech (skill /skill-security-scan): SAST + DAST + SCA + OWASP Top 10 para cualquier repo, con reporte HTML final.",
   "owner": {
     "name": "locano"
   },
   "plugins": [
     {
-      "name": "security-scan",
+      "name": "lc2tech",
       "source": "./",
       "description": "SAST + DAST + SCA + OWASP API Security Top 10 en cualquier repo, con reporte HTML final.",
       "version": "0.1.0"

@@ -1,6 +1,6 @@
 # Security Scan — SAST + SCA + DAST
 
-Plugin: `/security-scan`. Los scripts corren desde el plugin; el cwd es el
+Plugin: `/skill-security-scan`. Los scripts corren desde el plugin; el cwd es el
 repo a analizar.
 
 ## Uso

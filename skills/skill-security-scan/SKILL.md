@@ -1,6 +1,6 @@
 ---
-name: security-scan
-description: Análisis de seguridad de cualquier repo (web, API o serverless). SAST de toda la carpeta (Bandit, SCA, SonarQube); DAST (ZAP) solo si hay URL HTTP; checklist OWASP Top 10 y API Top 10. Usar cuando el usuario pida "corre un security scan", "/security-scan", o una auditoría de vulnerabilidades.
+name: skill-security-scan
+description: Análisis de seguridad de cualquier repo (web, API o serverless). SAST de toda la carpeta (Bandit, SCA, SonarQube); DAST (ZAP) solo si hay URL HTTP; checklist OWASP Top 10 y API Top 10. Usar cuando el usuario pida "corre un security scan", "/skill-security-scan", o una auditoría de vulnerabilidades.
 ---
 
 # Security Scan
