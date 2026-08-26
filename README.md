@@ -8,12 +8,12 @@ hay una URL HTTP, checklist OWASP Top 10 / API Top 10, y un HTML final.
 
 ## Qué cubre
 
-| Tipo | SAST (Sonar + Bandit/SCA) | DAST (ZAP) | OWASP |
-|---|---|---|---|
-| Web | Toda la carpeta | Si hay `--web-url` | Top 10 2021 |
-| API | Toda la carpeta | `--api-url` y/o OpenAPI | API Top 10 2023 |
-| Web + API | Un Sonar sobre el cwd | Las dos URLs, opcionales | Ambas listas |
-| Serverless | El código es código | Solo si hay URL HTTP (gateway / `sam local`) | SAST + revisión de handlers |
+| Tipo       | SAST (Sonar + Bandit/SCA) | DAST (ZAP)                                   | OWASP                       |
+| ---------- | ------------------------- | -------------------------------------------- | --------------------------- |
+| Web        | Toda la carpeta           | Si hay `--web-url`                           | Top 10 2021                 |
+| API        | Toda la carpeta           | `--api-url` y/o OpenAPI                      | API Top 10 2023             |
+| Web + API  | Un Sonar sobre el cwd     | Las dos URLs, opcionales                     | Ambas listas                |
+| Serverless | El código es código       | Solo si hay URL HTTP (gateway / `sam local`) | SAST + revisión de handlers |
 
 Sin URL el scan **es válido**. ZAP se omite; no es un fallo. No se valida el
 “orden de carpetas” del proyecto destino.
@@ -30,7 +30,7 @@ Login (también lo imprime el scan y el HTML):
 ## Instalación
 
 ```bash
-git clone git@github.com:<tu-org>/skill-security.git ~/skill-security
+git clone git@github.com:locano/skill-security.git ~/skill-security
 ```
 
 En Claude Code:

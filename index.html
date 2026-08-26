@@ -3,7 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>/skill-security-scan — Análisis de seguridad sin salir de tu repo</title>
+    <title>
+      /skill-security-scan — Análisis de seguridad sin salir de tu repo
+    </title>
     <meta
       name="description"
       content="Skill de Claude Code que corre SAST, DAST, SCA y OWASP API Top 10 directo en tu repositorio. Nacido de una auditoría real, no de un experimento."
@@ -705,9 +707,7 @@
           de infraestructura.
         </p>
         <div class="hero-ctas">
-          <a href="#instalar" class="btn btn-primary"
-            >Ver cómo instalarlo</a
-          >
+          <a href="#instalar" class="btn btn-primary">Ver cómo instalarlo</a>
           <a href="#origen" class="btn btn-secondary"
             >Cómo se usó en producción</a
           >
@@ -894,9 +894,9 @@
             </div>
             <div class="analysis-body">
               <p>
-                Checklist OWASP API Top 10 2023: ZAP (URL o OpenAPI) + mapeo
-                CWE + revisión de handlers (BOLA, auth, mass assignment).
-                Sirve para API y serverless; sin URL HTTP el SAST igual corre.
+                Checklist OWASP API Top 10 2023: ZAP (URL o OpenAPI) + mapeo CWE
+                + revisión de handlers (BOLA, auth, mass assignment). Sirve para
+                API y serverless; sin URL HTTP el SAST igual corre.
               </p>
               <div class="analysis-tools">
                 <span class="tool-chip">OWASP ZAP</span>
@@ -957,8 +957,8 @@
               <strong>Se degrada con gracia</strong>
               <p>
                 Si no tenés Docker, corre igual Bandit + npm/pip audit sin
-                fricción. SonarQube se omite solo por falta de Docker, no
-                porque haya que pedirlo. ZAP corre si diste una URL.
+                fricción. SonarQube se omite solo por falta de Docker, no porque
+                haya que pedirlo. ZAP corre si diste una URL.
               </p>
             </div>
           </div>
@@ -971,9 +971,9 @@
           <h2>Instalación: un plugin interno, sin marketplace público</h2>
           <p>
             No se copian archivos a mano a cada repo. Es un plugin de Claude
-            Code que cada persona instala una vez desde un clone propio, y
-            queda disponible como <code>/skill-security-scan</code> en cualquier
-            repo donde lo active.
+            Code que cada persona instala una vez desde un clone propio, y queda
+            disponible como <code>/skill-security-scan</code> en cualquier repo
+            donde lo active.
           </p>
         </div>
 
@@ -985,12 +985,12 @@
                 Cloná el repo (no hace falta que sea público)
               </div>
               <p class="install-desc">
-                Un clone permanente en tu máquina — es de donde Claude Code va
-                a leer el plugin.
+                Un clone permanente en tu máquina — es de donde Claude Code va a
+                leer el plugin.
               </p>
               <div class="code-block">
                 <pre><span class="cm"># clone interno, ej. a tu carpeta de proyectos</span>
-git clone git@github.com:&lt;tu-org&gt;/skill-security.git ~/skill-security</pre>
+git clone git@github.com:locano/skill-security.git ~/skill-security</pre>
                 <button class="copy-btn" type="button" data-copy-target="cmd-1">
                   Copiar
                 </button>
@@ -1005,9 +1005,9 @@ git clone git@github.com:&lt;tu-org&gt;/skill-security.git ~/skill-security</pre
                 Agregá el marketplace local e instalá el plugin
               </div>
               <p class="install-desc">
-                <code>marketplace add</code> acepta una ruta local — no
-                publica nada ni requiere un repo público. Se hace una sola vez
-                por persona.
+                <code>marketplace add</code> acepta una ruta local — no publica
+                nada ni requiere un repo público. Se hace una sola vez por
+                persona.
               </p>
               <div class="code-block">
                 <pre><span class="cm">$</span> claude
